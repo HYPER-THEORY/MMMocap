@@ -26,8 +26,8 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
-#include <array>
 #include <unordered_set>
+#include <array>
 #include <functional>
 #include <sstream>
 #include <string>
@@ -54,9 +54,18 @@ public:
 	 * Sets the string describing the error. calling this function will replace
 	 * the previous error message.
 	 *
-	 * \param e error message
+	 * \param m error message
 	 */
-	static void set(const std::string& e);
+	static void set(const std::string& m);
+	
+	/**
+	 * Sets the string describing the error. calling this function will replace
+	 * the previous error message.
+	 *
+	 * \param l error location
+	 * \param m error message
+	 */
+	static void set(const std::string& l, const std::string& m);
 	
 	/**
 	 * Clears the current error message.
@@ -129,120 +138,6 @@ public:
 }
 
 /* -------------------------------------------------------------------------- */
-/* ---- ink/core/Format.h --------------------------------------------------- */
-/* -------------------------------------------------------------------------- */
-
-namespace Ink {
-
-class Format {
-public:
-	/**
-	 * Formats a format-string with arguments. Formatting rules are similar with
-	 * std::formatter in C++20.
-	 *
-	 * \param s format-string
-	 * \param a arguments
-	 */
-	template <typename... Types>
-	static std::string format(const char* s, Types... a);
-	
-private:
-	template <typename Ptr, typename Type>
-	static void format_args(Ptr p, Type v);
-	
-	template <typename Ptr>
-	static void format_args(Ptr p, char v);
-	
-	template <typename Ptr>
-	static void format_args(Ptr p, wchar_t v);
-	
-	template <typename Ptr>
-	static void format_args(Ptr p, const char* v);
-	
-	template <typename Ptr>
-	static void format_args(Ptr p, const std::string& v);
-	
-	template <typename Ptr, typename Type, typename... Types>
-	static void format_args(Ptr p, Type v, Types... a);
-};
-
-template <typename... Types>
-std::string Format::format(const char* s, Types... a) {
-	std::string args[sizeof...(a)];
-	format_args(args, a...);
-	std::string formatted;
-	bool specifier = false;
-	int arg_id = 0;
-	int user_arg_id = -1;
-	for (int i = 0; s[i] != '\0'; ++i) {
-		const char& c = s[i];
-		char l = i > 0 ? s[i - 1] : '\0';
-		if (c == '{' || c == '}') {
-			specifier = !specifier;
-		}
-		if (c == '{' && c == l) {
-			formatted.append(1, '{');
-			continue;
-		}
-		if (c == '}' && c == l) {
-			formatted.append(1, '}');
-			continue;
-		}
-		if (c != '}' && !specifier) {
-			formatted.append(1, c);
-		}
-		if (c != '{' && specifier) {
-			if (c < '0' || c > '9') continue;
-			if (user_arg_id == -1) user_arg_id = 0;
-			user_arg_id = user_arg_id * 10 + c - '0';
-		}
-		if (c != '}' || specifier) {
-			continue;
-		}
-		if (user_arg_id == -1) {
-			formatted.append(args[arg_id++]);
-		} else {
-			formatted.append(args[user_arg_id]);
-			user_arg_id = -1;
-		}
-	}
-	return formatted;
-}
-
-template <typename Ptr, typename Type>
-void Format::format_args(Ptr p, Type v) {
-	*p = std::to_string(v);
-}
-
-template <typename Ptr>
-void Format::format_args(Ptr p, char v) {
-	*p = std::string(1, v);
-}
-
-template <typename Ptr>
-void Format::format_args(Ptr p, wchar_t v) {
-	*p = std::string(1, v);
-}
-
-template <typename Ptr>
-void Format::format_args(Ptr p, const char* v) {
-	*p = v;
-}
-
-template <typename Ptr>
-void Format::format_args(Ptr p, const std::string& v) {
-	*p = v;
-}
-
-template <typename Ptr, typename Type, typename... Types>
-void Format::format_args(Ptr p, Type v, Types... a) {
-	format_args(p, v);
-	format_args(p + 1, a...);
-}
-
-}
-
-/* -------------------------------------------------------------------------- */
 /* ---- ink/core/Date.h ----------------------------------------------------- */
 /* -------------------------------------------------------------------------- */
 
@@ -289,15 +184,19 @@ public:
 	static long long get_time();
 	
 	/**
-	 * Returns the date that is initialized according to local time.
+	 * Returns the date which is initialized according to local time.
+	 *
+	 * \param t the custom time in milliseconds
 	 */
-	static Date get_local();
+	static Date get_local(long long t = -1);
 	
 	/**
-	 * Returns the date that is initialized according to coordinated universal
+	 * Returns the date which is initialized according to coordinated universal
 	 * time (UTC) time.
+	 *
+	 * \param t the custom time in milliseconds
 	 */
-	static Date get_utc();
+	static Date get_utc(long long t = -1);
 };
 
 }
@@ -1604,59 +1503,6 @@ DMat<r, c> operator/(const DMat<r, c>& v1, double v2) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ---- ink/math/Euler.h ---------------------------------------------------- */
-/* -------------------------------------------------------------------------- */
-
-namespace Ink {
-
-enum EulerOrder {
-	EULER_XYZ,
-	EULER_XZY,
-	EULER_YXZ,
-	EULER_YZX,
-	EULER_ZXY,
-	EULER_ZYX,
-};
-
-class Euler {
-public:
-	float x = 0;                     /**< the rotation angle of X axis */
-	float y = 0;                     /**< the rotation angle of Y axis */
-	float z = 0;                     /**< the rotation angle of Z axis */
-	EulerOrder order = EULER_XYZ;    /**< the order of rotations */
-	
-	/**
-	 * Creates a new Euler object.
-	 */
-	explicit Euler() = default;
-	
-	/**
-	 * Creates a new Euler object and initializes it with rotations and order.
-	 *
-	 * \param x the rotation angle of X axis
-	 * \param y the rotation angle of Y axis
-	 * \param z the rotation angle of Z axis
-	 * \param o the order of rotations
-	 */
-	explicit Euler(float x, float y, float z, EulerOrder o = EULER_XYZ);
-	
-	/**
-	 * Creates a new Euler object and initializes it with rotations and order.
-	 *
-	 * \param r the rotation vector
-	 * \param o the order of rotations
-	 */
-	explicit Euler(Vec3 r, EulerOrder o = EULER_XYZ);
-	
-	/**
-	 * Transforms the Euler angles to rotation matrix.
-	 */
-	Mat3 to_rotation_matrix() const;
-};
-
-}
-
-/* -------------------------------------------------------------------------- */
 /* ---- ink/math/Ray.h ------------------------------------------------------ */
 /* -------------------------------------------------------------------------- */
 
@@ -1721,6 +1567,151 @@ public:
 }
 
 /* -------------------------------------------------------------------------- */
+/* ---- ink/math/Euler.h ---------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+
+namespace Ink {
+
+enum EulerOrder {
+	EULER_XYZ,
+	EULER_XZY,
+	EULER_YXZ,
+	EULER_YZX,
+	EULER_ZXY,
+	EULER_ZYX,
+};
+
+class Euler {
+public:
+	float x = 0;                     /**< the rotation angle of X axis */
+	float y = 0;                     /**< the rotation angle of Y axis */
+	float z = 0;                     /**< the rotation angle of Z axis */
+	EulerOrder order = EULER_XYZ;    /**< the order of rotations */
+	
+	/**
+	 * Creates a new Euler object.
+	 */
+	explicit Euler() = default;
+	
+	/**
+	 * Creates a new Euler object and initializes it with rotations and order.
+	 *
+	 * \param x the rotation angle of X axis
+	 * \param y the rotation angle of Y axis
+	 * \param z the rotation angle of Z axis
+	 * \param o the order of rotations
+	 */
+	explicit Euler(float x, float y, float z, EulerOrder o = EULER_XYZ);
+	
+	/**
+	 * Creates a new Euler object and initializes it with rotations and order.
+	 *
+	 * \param r the rotation vector
+	 * \param o the order of rotations
+	 */
+	explicit Euler(Vec3 r, EulerOrder o = EULER_XYZ);
+	
+	/**
+	 * Transforms the Euler angles to rotation matrix.
+	 */
+	Mat3 to_rotation_matrix() const;
+};
+
+}
+
+/* -------------------------------------------------------------------------- */
+/* ---- ink/math/Color.h ---------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+
+namespace Ink {
+
+class Color {
+public:
+	/**
+	 * Converts the specified color from RGB color space to SRGB color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 rgb_to_srgb(const Vec3& c);
+	
+	/**
+	 * Converts the specified color from SRGB color space to RGB color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 srgb_to_rgb(const Vec3& c);
+	
+	/**
+	 * Converts the specified color from RGB color space to XYZ color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 rgb_to_xyz(const Vec3& c);
+	
+	/**
+	 * Converts the specified color from XYZ color space to RGB color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 xyz_to_rgb(const Vec3& c);
+	
+	/**
+	 * Converts the specified color from RGB color space to HSV color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 rgb_to_hsv(const Vec3& c);
+	
+	/**
+	 * Converts the specified color from HSV color space to RGB color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 hsv_to_rgb(const Vec3& c);
+	
+	/**
+	 * Converts the specified color from RGB color space to HSL color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 rgb_to_hsl(const Vec3& c);
+	
+	/**
+	 * Converts the specified color from HSL color space to RGB color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 hsl_to_rgb(const Vec3& c);
+	
+	/**
+	 * Converts the specified color from RGB color space to HCY color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 rgb_to_hcy(const Vec3& c);
+	
+	/**
+	 * Converts the specified color from HCY color space to RGB color space.
+	 *
+	 * \param c color
+	 */
+	static Vec3 hcy_to_rgb(const Vec3& c);
+	
+private:
+	static inline float saturate(float v);
+	
+	static inline float rgb_to_srgb(float v);
+	
+	static inline float srgb_to_rgb(float v);
+	
+	static inline Vec3 hue_to_rgb(float h);
+	
+	static inline Vec3 rgb_to_hcv(const Vec3& c);
+};
+
+}
+
+/* -------------------------------------------------------------------------- */
 /* ---- ink/objects/Enums.h ------------------------------------------------- */
 /* -------------------------------------------------------------------------- */
 
@@ -1757,6 +1748,14 @@ enum ImageType {
 	IMAGE_HALF_FLOAT,
 	IMAGE_FLOAT,
 	IMAGE_UINT_24_8,
+};
+
+enum ImageFormat {
+	IMAGE_COLOR,
+	IMAGE_COLOR_INTEGER,
+	IMAGE_DEPTH,
+	IMAGE_STENCIL,
+	IMAGE_DEPTH_STENCIL,
 };
 
 enum ComparisonFunc {
@@ -1915,7 +1914,7 @@ public:
 	/**
 	 * Returns the number of uniform variables.
 	 */
-	size_t count() const;
+	size_t get_count() const;
 	
 	/**
 	 * Returns the name of unifrom variable at the specified index.
@@ -2029,6 +2028,11 @@ public:
 	 */
 	void set_m4(const std::string& n, const Mat4& v);
 	
+	/**
+	 * Clears all the data from the uniforms object.
+	 */
+	void clear();
+	
 private:
 	std::vector<float> data;
 	
@@ -2115,6 +2119,11 @@ public:
 	 * \param f flag
 	 */
 	void set_if(const std::string& n, bool f);
+	
+	/**
+	 * Clears all the data from the defines object.
+	 */
+	void clear();
 	
 private:
 	std::string defines;
@@ -2382,10 +2391,6 @@ private:
 	static inline Type pack(float v);
 	
 	static inline float saturate(float v);
-	
-	static inline Vec3 rgb_to_hcv(float r, float g, float b);
-	
-	static inline Vec3 hue_to_rgb(float h);
 };
 
 }
@@ -2400,144 +2405,99 @@ class Material {
 public:
 	std::string name;                     /**< material name */
 	
+	RenderSide side;                      /**< which side of faces will be rendered */
 	
-	RenderSide side                       /**< which side of faces will be rendered */
-		= FRONT_SIDE;
-	
-	RenderSide shadow_side                /**< which side of faces will cast shadows */
-		= BACK_SIDE;
+	RenderSide shadow_side;               /**< which side of faces will cast shadows */
 	
 	bool visible = true;                  /**< whether the material will be rendered */
 	
-	
 	bool wireframe = false;               /**< whether to render mesh as wireframe */
-	
 	
 	bool depth_test = true;               /**< whether to enable depth test in rendering */
 	
-	
-	ComparisonFunc depth_func             /**< which depth comparison function to use */
-		= FUNC_LEQUAL;
+	ComparisonFunc depth_func;            /**< which depth comparison function to use */
 	
 	bool stencil_test = false;            /**< whether to enable stencil test in rendering */
 	
-	
 	int stencil_writemask = 0xFF;         /**< the mask when writing to stencil buffer */
-	
 	
 	int stencil_ref = 0;                  /**< the reference value to be used in stencil comparison */
 	
-	
 	int stencil_mask = 0xFF;              /**< the mask to be used in stencil comparison */
 	
+	ComparisonFunc stencil_func;          /**< which stencil comparison function to use */
 	
-	ComparisonFunc stencil_func           /**< which stencil comparison function to use */
-		= FUNC_ALWAYS;
+	StencilOperation stencil_fail;        /**< the operation when the stencil test fails */
 	
-	StencilOperation stencil_fail         /**< the operation when the stencil test fails */
-		= STENCIL_KEEP;
+	StencilOperation stencil_zfail;       /**< the operation when the stencil test passes but depth test fails */
 	
-	StencilOperation stencil_zfail        /**< the operation when the stencil test passes but depth test fails */
-		= STENCIL_KEEP;
-	
-	StencilOperation stencil_zpass        /**< the operation when both the stencil test and depth test pass */
-		= STENCIL_KEEP;
+	StencilOperation stencil_zpass;       /**< the operation when both the stencil test and depth test pass */
 	
 	bool blending = false;                /**< whether to enable blending in rendering */
 	
+	BlendOperation blend_op_rgb;          /**< which RGB blend operation to use in blending */
 	
-	BlendOperation blend_op_rgb           /**< which RGB blend operation to use in blending */
-		= BLEND_ADD;
+	BlendOperation blend_op_alpha;        /**< which alpha blend operation to use in blending */
 	
-	BlendOperation blend_op_alpha         /**< which alpha blend operation to use in blending */
-		= BLEND_ADD;
+	BlendFactor blend_src_rgb;            /**< the RGB source blend factor in blending */
 	
-	BlendFactor blend_src_rgb             /**< the RGB source blend factor in blending */
-		= FACTOR_SRC_ALPHA;
+	BlendFactor blend_src_alpha;          /**< the alpha source blend factor in blending */
 	
-	BlendFactor blend_src_alpha           /**< the alpha source blend factor in blending */
-		= FACTOR_SRC_ALPHA;
+	BlendFactor blend_dst_rgb;            /**< the RGB destination blend factor in blending */
 	
-	BlendFactor blend_dst_rgb             /**< the RGB destination blend factor in blending */
-		= FACTOR_ONE_MINUS_SRC_ALPHA;
-	
-	BlendFactor blend_dst_alpha           /**< the alpha destination blend factor in blending */
-		= FACTOR_ONE_MINUS_SRC_ALPHA;
+	BlendFactor blend_dst_alpha;          /**< the alpha destination blend factor in blending */
 	
 	float alpha_test = 0;                 /**< threshold of alpha test, pixels with lower alpha will be discarded */
 	
+	bool use_map_with_alpha = true;       /**< whether to use alpha channel from color map */
 	
-	bool map_with_alpha = true;           /**< whether to use alpha channel from color map */
+	bool use_vertex_color = false;        /**< whether to use vertex colors from mesh */
 	
-	
-	bool vertex_color = false;            /**< whether to use vertex colors from mesh */
-	
-	
-	bool tangent_space = true;            /**< whether the normal map defines in tangent space */
-	
+	bool use_tangent_space = true;        /**< whether the normal map defines in tangent space */
 	
 	float normal_scale = 1;               /**< how much the normal map affects the material */
 	
-	
 	float displacement_scale = 1;         /**< how much the displacement map affects the mesh */
-	
 	
 	Vec3 color = {1, 1, 1};               /**< the base color of material, default is white */
 	
-	
 	float alpha = 1;                      /**< the opacity of material, range is 0 to 1 */
-	
 	
 	float specular = 0.5;                 /**< how specular the material appears, range is 0 to 1 */
 	
-	
 	float metalness = 0;                  /**< how metallic the material appears, range is 0 to 1 */
-	
 	
 	float roughness = 1;                  /**< how rough the material appears, range is 0 to 1 */
 	
-	
 	Vec3 emissive = {0, 0, 0};            /**< the emissive color of material, default is black */
-	
 	
 	float emissive_intensity = 1;         /**< the emissive intensity of material, range is 0 to 1 */
 	
-	
 	float ao_intensity = 1;               /**< the occlusion intensity of material, range is 0 to 1 */
-	
 	
 	Image* normal_map = nullptr;          /**< the map determines the normals of mesh */
 	
-	
 	Image* displacement_map = nullptr;    /**< the map determines the offsets of mesh's vertices */
-	
 	
 	Image* color_map = nullptr;           /**< the map affects the base color of material */
 	
-	
 	Image* alpha_map = nullptr;           /**< the map affects the alpha of material */
-	
 	
 	Image* roughness_map = nullptr;       /**< the map affects how rough the material appears */
 	
-	
 	Image* metalness_map = nullptr;       /**< the map affects how metallic the material appears */
-	
 	
 	Image* specular_map = nullptr;        /**< the map affects how specular the material appears */
 	
-	
 	Image* emissive_map = nullptr;        /**< the map affects the emissive color of material */
-	
 	
 	Image* ao_map = nullptr;              /**< the map affects the ambient occlusion of material */
 	
+	Image* custom_maps[16];               /**< the custom maps of material */
 	
 	void* shader = nullptr;               /**< custom shader determines how lights affect material */
 	
-	
 	void* reflection_probe = nullptr;     /**< reflection probe affects the environment light of material */
-	
 	
 	Uniforms* uniforms = nullptr;         /**< the custom uniforms of material */
 	
@@ -2547,36 +2507,6 @@ public:
 	 * \param n material name
 	 */
 	explicit Material(const std::string& n = "");
-	
-	/**
-	 * Returns the custom image at the specified index in the material.
-	 *
-	 * \param i the index of image
-	 */
-	Image* get_image(int i) const;
-	
-	/**
-	 * Sets a custom image at the specified index to the material.
-	 *
-	 * \param i image index
-	 * \param c custom image
-	 */
-	void set_image(int i, Image* c);
-	
-	/**
-	 * Removes the custom image at the specified index from the material.
-	 *
-	 * \param i image index
-	 */
-	void remove_image(int i);
-	
-	/**
-	 * Clears all the custom images from the material.
-	 */
-	void clear_images();
-	
-private:
-	std::unordered_map<int, Image*> images;
 };
 
 }
@@ -2614,14 +2544,7 @@ public:
 	 *
 	 * \param n instance name
 	 */
-	static Instance* create(const std::string& n = "");
-	
-	/**
-	 * Destroys the specified Instance object.
-	 *
-	 * \param i instance
-	 */
-	static void destroy(const Instance* i);
+	explicit Instance(const std::string& n = "");
 	
 	/**
 	 * Adds the specified instance as the child of the instance. The index
@@ -2745,8 +2668,6 @@ protected:
 	Instance* parent = nullptr;
 	
 	std::vector<Instance*> children;
-	
-	explicit Instance(const std::string& n);
 };
 
 }
@@ -2756,6 +2677,16 @@ protected:
 /* -------------------------------------------------------------------------- */
 
 namespace Ink {
+
+struct LoadObject {
+	std::vector<Mesh> meshes;
+	std::vector<Material> materials;
+};
+
+struct ObjOptions {
+	bool vertex_color = false;
+	std::string group = "g";
+};
 
 class Loader {
 public:
@@ -2774,19 +2705,20 @@ public:
 	static Image load_image_hdr(const std::string& p);
 	
 	/**
-	 * Loads the mesh data from the specified OBJ file into mesh vector.
-	 *
-	 * \param p the path to the file
-	 * \param g grouping keyword, default is "g"
-	 */
-	static std::vector<Mesh> load_obj(const std::string& p, const std::string& g = "g");
-	
-	/**
 	 * Loads the material data from the specified MTL file into material vector.
 	 *
 	 * \param p the path to the file
 	 */
-	static std::vector<Material> load_mtl(const std::string& p);
+	static LoadObject load_mtl(const std::string& p);
+	
+	/**
+	 * Loads the mesh data from the specified OBJ file into mesh vector. The
+	 * meshes are divided by the custom grouping keyword.
+	 *
+	 * \param p the path to the file
+	 * \param o options when loading OBJ file
+	 */
+	static LoadObject load_obj(const std::string& p, const ObjOptions& o = {});
 };
 
 }
@@ -3009,149 +2941,6 @@ private:
 }
 
 /* -------------------------------------------------------------------------- */
-/* ---- ink/graphics/Software.h --------------------------------------------- */
-/* -------------------------------------------------------------------------- */
-
-namespace Ink::Soft {
-
-class PointList {
-public:
-	size_t size = 0;                /**< the size of point list */
-	Vec4* vertices = nullptr;       /**< the vertices of point list */
-	Vec3* barycenters = nullptr;    /**< the baycenter coordinates of point list */
-	
-	/**
-	 * Adds a point into this point list.
-	 *
-	 * \param v vertex
-	 * \param b baycenter coordinates
-	 */
-	void add_point(const Vec4& v, const Vec3& b);
-};
-
-class Shader {
-public:
-	Mat4 model;                      /**< the matrix of model transform */
-	Mat4 view;                       /**< the matrix of viewing transform */
-	Mat4 proj;                       /**< the matrix of projection transform */
-	Mat4 model_view;                 /**< the matrix of model view transform */
-	Mat4 model_view_proj;            /**< the matrix of model view projection transform */
-	Vec3 camera_pos;                 /**< the position of camera */
-	
-	/**
-	 * Creates a new Shader object.
-	 */
-	explicit Shader() = default;
-	
-	/**
-	 * The function to complete the task of vertex shader.
-	 *
-	 * \param m mesh
-	 * \param i mesh index
-	 * \param id vertex id
-	 * \param v vertex position
-	 */
-	virtual void vextex(const Mesh& m, int i, int id, Vec4& v) = 0;
-	
-	/**
-	 * The function to complete the task of geometry shader.
-	 *
-	 * \param v vertex positions
-	 */
-	virtual void geometry(Vec4* v) = 0;
-	
-	/**
-	 * The function to complete the task of fragment shader.
-	 *
-	 * \param b barycentric coordinate
-	 * \param p screen position
-	 * \param c out color
-	 */
-	virtual void fragment(const Vec3& b, const Vec2& p, Vec4& c) = 0;
-};
-
-static int viewport_w = 0;
-static int viewport_h = 0;
-
-/**
- * Returns the width and height of viewport region.
- */
-std::pair<int, int> get_viewport();
-
-/**
- * Sets the viewport region to render from (0, 0) to (width, height).
- *
- * \param w the width of the viewport
- * \param h the height of the viewport
- */
-void set_viewport(int w, int h);
-
-/**
- * Clips the point list at near clip plane.
- *
- * \param i input point list
- * \param z znear plane distance
- * \param o output point list
- */
-void znear_clip(const PointList& i, float z, PointList& o);
-
-/**
- * Clips the pointlist at far clip plane.
- *
- * \param i input point list
- * \param z zfar plane distance
- * \param o output point list
- */
-void zfar_clip(const PointList& i, float z, PointList& o);
-
-/**
- * Rasterizes the triangles in pointlist. The results will be saved in Z-Buffer
- * and canvas.
- *
- * \param p pointlist
- * \param d device vertices
- * \param s shader
- * \param zb Z-buffer
- * \param canvas canvas
- */
-void rasterize(const PointList& p, const Vec3* d, Shader& s, double* zb, Vec4* canvas);
-
-/**
- * Rasterizes the triangles in pointlist without shading. The results will be
- * saved in Z-Buffer.
- *
- * \param p pointlist
- * \param d device vertices
- * \param zb Z-Buffer
- */
-void rasterize(const PointList& p, const Vec3* d, double* zb);
-
-/**
- * Renders the mesh using a camera. Drawing will only affects Z-Buffer when
- * canvas is nullptr.
- *
- * \param m mesh
- * \param c camera
- * \param s shader
- * \param zb Z-Buffer
- * \param canvas canvas
- */
-void render(const Mesh& m, const Camera& c, Shader& s, double* zb, Vec4* canvas = nullptr);
-
-/**
- * Renders the instance using a camera. The results will be saved in canvas.
- *
- * \param i instance
- * \param c camera
- * \param s shader
- * \param zb Z-Buffer
- * \param canvas canvas
- */
-void render_instance(const Instance* i, const Camera& c, Shader& s, double* zb, Vec4* canvas = nullptr);
-
-}
-
-/* -------------------------------------------------------------------------- */
 /* ---- ink/graphics/Gpu.h -------------------------------------------------- */
 /* -------------------------------------------------------------------------- */
 
@@ -3277,6 +3066,8 @@ public:
 	
 	/**
 	 * Sets the specified clear value for depth buffer. Default is 1.
+	 *
+	 * \param d clear depth
 	 */
 	static void set_clear_depth(double d);
 	
@@ -3325,6 +3116,8 @@ public:
 	
 	/**
 	 * Sets the specified clear value for stencil buffer. Default is 0.
+	 *
+	 * \param s clear stencil
 	 */
 	static void set_clear_stencil(int s);
 	
@@ -4015,8 +3808,9 @@ public:
 	 *
 	 * \param i image
 	 * \param f texture format
+	 * \param t image data format
 	 */
-	void init_2d(const Image& i, TextureFormat f);
+	void init_2d(const Image& i, TextureFormat f, ImageFormat t = IMAGE_COLOR);
 	
 	/**
 	 * Initializes the texture as 3d texture with empty data.
@@ -4050,9 +3844,10 @@ public:
 	 * \param pz front (+Z) side of cube image
 	 * \param nz back  (-Z) side of cube image
 	 * \param f texture format
+	 * \param t image data format
 	 */
-	void init_cube(const Image& px, const Image& nx, const Image& py,
-				   const Image& ny, const Image& pz, const Image& nz, TextureFormat f);
+	void init_cube(const Image& px, const Image& nx, const Image& py, const Image& ny,
+				   const Image& pz, const Image& nz, TextureFormat f, ImageFormat t = IMAGE_COLOR);
 	
 	/**
 	 * Initializes the texture as 1D array texture with empty data.
@@ -4112,14 +3907,12 @@ public:
 	int get_layer() const;
 	
 	/**
-	 * Returns the type of texture if the texture is legal, returns -1
-	 * otherwise.
+	 * Returns the type of texture.
 	 */
 	TextureType get_type() const;
 	
 	/**
-	 * Returns the format of texture if the texture is legal, returns -1
-	 * otherwise.
+	 * Returns the format of texture.
 	 */
 	TextureFormat get_format() const;
 	
@@ -4201,19 +3994,19 @@ public:
 	int activate(int l) const;
 	
 	/**
-	 * Returns the default texture format for the specified image.
-	 *
-	 * \param i image
-	 */
-	static TextureFormat default_format(const Image& i);
-	
-	/**
 	 * Returns the default texture format for the specified channel and byte.
 	 *
 	 * \param c channel
 	 * \param b byte
 	 */
 	static TextureFormat default_format(int c, int b);
+	
+	/**
+	 * Returns the default texture format for the specified image.
+	 *
+	 * \param i image
+	 */
+	static TextureFormat default_format(const Image& i);
 	
 private:
 	uint32_t id = 0;
@@ -4688,11 +4481,6 @@ public:
 	explicit Shadow() = default;
 	
 	/**
-	 * The copy constructor is deleted.
-	 */
-	Shadow(const Shadow&) = delete;
-	
-	/**
 	 * Returns the sample numbers when using PCF / PCSS shadow.
 	 */
 	static int get_samples();
@@ -5025,7 +4813,7 @@ public:
 	 * \param n material name
 	 * \param s specified instance
 	 */
-	Material* get_material(const std::string& n, const Instance* s) const;
+	Material* get_material(const std::string& n, const Instance& s) const;
 	
 	/**
 	 * Sets the specified material with name to the scene.
@@ -5053,7 +4841,7 @@ public:
 	 * \param s specified instance
 	 * \param m material
 	 */
-	void set_material(const std::string& n, const Instance* s, Material* m);
+	void set_material(const std::string& n, const Instance& s, Material* m);
 	
 	/**
 	 * Removes the specified material matching the specified name from the
@@ -5079,7 +4867,7 @@ public:
 	 * \param n material name
 	 * \param s specified instance
 	 */
-	void remove_material(const std::string& n, const Instance* s);
+	void remove_material(const std::string& n, const Instance& s);
 	
 	/**
 	 * Removes all the materials from the scene.
@@ -5458,6 +5246,12 @@ public:
 	void unload_mesh(const Mesh& m);
 	
 	/**
+	 * Clears all values from the image cache. The caches will be generated
+	 * automatically when loading meshes.
+	 */
+	void clear_mesh_caches();
+	
+	/**
 	 * Loads the specified image and creates corresponding texture. This function
 	 * will invoke the texture callback.
 	 *
@@ -5471,6 +5265,12 @@ public:
 	 * \param i image
 	 */
 	void unload_image(const Image& i);
+	
+	/**
+	 * Clears all values from the image cache. The caches will be generated
+	 * automatically when loading images.
+	 */
+	void clear_image_caches();
 	
 	/**
 	 * Loads all the meshes and images in the scene.
@@ -5488,7 +5288,7 @@ public:
 	
 	/**
 	 * Clears all values from the scene cache. The caches will be generated
-	 * automatically when loading mesh, image or scene.
+	 * automatically when loading meshes, images or scenes.
 	 */
 	void clear_scene_caches();
 	
@@ -5627,9 +5427,9 @@ private:
 	
 	static std::unique_ptr<Gpu::RenderTarget> probe_target;
 	
-	void render_skybox_to_buffer(const Camera& c, int r) const;
+	void render_skybox_to_buffer(const Camera& c, RenderingMode r) const;
 	
-	void render_to_buffer(const Scene& s, const Camera& c, int r, bool t) const;
+	void render_to_buffer(const Scene& s, const Camera& c, RenderingMode r, bool t) const;
 	
 	void render_to_shadow(const Scene& s, const Camera& c) const;
 	
@@ -5661,7 +5461,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	virtual void render() const = 0;
+	virtual void render() = 0;
 	
 	/**
 	 * Returns the current render target if there is, returns nullptr otherwise.
@@ -5731,7 +5531,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the 2D texture represents the input of rendering pass.
@@ -5772,7 +5572,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the 2D texture A represents the input of rendering pass.
@@ -5892,7 +5692,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the 2D texture represents the input of rendering pass.
@@ -5939,7 +5739,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the mode in tone mapping.
@@ -5985,64 +5785,64 @@ public:
 	void set_camera(const Camera* c);
 	
 	/**
-	 * Returns the 2D texture represents the diffuse color buffer in G-Buffers.
+	 * Returns the 2D texture represents the base color buffer in G-Buffers.
 	 */
-	const Gpu::Texture* get_buffer_c() const;
+	const Gpu::Texture* get_texture_color() const;
 	
 	/**
-	 * Sets the specified 2D texture as the diffuse color buffer in G-Buffers.
+	 * Sets the specified 2D texture as the base color buffer in G-Buffers.
 	 *
-	 * \param t color buffer texture
+	 * \param t base color texture
 	 */
-	void set_buffer_c(const Gpu::Texture* t);
+	void set_texture_color(const Gpu::Texture* t);
 	
 	/**
 	 * Returns the 2D texture represents the world normal buffer in G-Buffers.
 	 */
-	const Gpu::Texture* get_buffer_n() const;
+	const Gpu::Texture* get_texture_normal() const;
 	
 	/**
 	 * Sets the specified 2D texture as the world normal buffer in G-Buffers.
 	 *
-	 * \param t normal buffer texture
+	 * \param t world normal texture
 	 */
-	void set_buffer_n(const Gpu::Texture* t);
+	void set_texture_normal(const Gpu::Texture* t);
 	
 	/**
-	 * Returns the 2D texture represents the material buffer in G-Buffers.
+	 * Returns the 2D texture represents the material data buffer in G-Buffers.
 	 */
-	const Gpu::Texture* get_buffer_m() const;
+	const Gpu::Texture* get_texture_material() const;
 	
 	/**
-	 * Sets the specified 2D texture as the material buffer in G-Buffers.
+	 * Sets the specified 2D texture as the material data buffer in G-Buffers.
 	 *
-	 * \param t material buffer texture
+	 * \param t material data texture
 	 */
-	void set_buffer_m(const Gpu::Texture* t);
+	void set_texture_material(const Gpu::Texture* t);
 	
 	/**
-	 * Returns the 2D texture represents the additional buffer in G-Buffers.
+	 * Returns the 2D texture represents the indirect light buffer in G-Buffers.
 	 */
-	const Gpu::Texture* get_buffer_a() const;
+	const Gpu::Texture* get_texture_light() const;
 	
 	/**
-	 * Sets the specified 2D texture as the additional buffer in G-Buffers.
+	 * Sets the specified 2D texture as the indirect light buffer in G-Buffers.
 	 *
-	 * \param t additional buffer texture
+	 * \param t indirect light texture
 	 */
-	void set_buffer_a(const Gpu::Texture* t);
+	void set_texture_light(const Gpu::Texture* t);
 	
 	/**
-	 * Returns the 2D texture represents the depth buffer in G-Buffers.
+	 * Returns the 2D texture represents the depth buffer / Z-Buffer.
 	 */
-	const Gpu::Texture* get_buffer_d() const;
+	const Gpu::Texture* get_texture_depth() const;
 	
 	/**
-	 * Sets the specified 2D texture as the depth buffer in G-Buffers.
+	 * Sets the specified 2D texture as the depth buffer / Z-Buffer.
 	 *
-	 * \param d depth buffer texture
+	 * \param d depth texture
 	 */
-	void set_buffer_d(const Gpu::Texture* d);
+	void set_texture_depth(const Gpu::Texture* d);
 	
 private:
 	int tone_map_mode = LINEAR_TONE_MAP;
@@ -6053,15 +5853,15 @@ private:
 	
 	const Camera* camera = nullptr;
 	
-	const Gpu::Texture* buffer_c = nullptr;
+	const Gpu::Texture* g_color = nullptr;
 	
-	const Gpu::Texture* buffer_n = nullptr;
+	const Gpu::Texture* g_normal = nullptr;
 	
-	const Gpu::Texture* buffer_m = nullptr;
+	const Gpu::Texture* g_material = nullptr;
 	
-	const Gpu::Texture* buffer_a = nullptr;
+	const Gpu::Texture* g_light = nullptr;
 	
-	const Gpu::Texture* buffer_d = nullptr;
+	const Gpu::Texture* z_map = nullptr;
 };
 
 }
@@ -6079,8 +5879,8 @@ public:
 	int samples = 32;         /**< sample number, must be 16, 32 or 64 */
 	float radius = 0;         /**< radius to search for occluders */
 	float max_radius = 0;     /**< the maximum radius from occluder to pixel */
+	float max_z = 100;        /**< the maximum depth to render ambient occlusion */
 	float intensity = 1;      /**< the intensity of ambient occlusion, range is 0 to 1 */
-	float max_depth = 100;    /**< the maximum depth to render ambient occlusion */
 	
 	/**
 	 * Creates a new SSAOPass (Screen Space Ambient Occlusion) object.
@@ -6107,7 +5907,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the camera represents the input of rendering pass.
@@ -6136,33 +5936,33 @@ public:
 	/**
 	 * Returns the 2D texture represents the world normal buffer in G-Buffers.
 	 */
-	const Gpu::Texture* get_buffer_n() const;
+	const Gpu::Texture* get_texture_normal() const;
 	
 	/**
 	 * Sets the specified 2D texture as the world normal buffer in G-Buffers.
 	 *
-	 * \param n normal buffer texture
+	 * \param t world normal texture
 	 */
-	void set_buffer_n(const Gpu::Texture* n);
+	void set_texture_normal(const Gpu::Texture* t);
 	
 	/**
-	 * Returns the 2D texture represents the depth buffer in G-Buffers.
+	 * Returns the 2D texture represents the depth buffer / Z-Buffer.
 	 */
-	const Gpu::Texture* get_buffer_d() const;
+	const Gpu::Texture* get_texture_depth() const;
 	
 	/**
-	 * Sets the specified 2D texture as the depth buffer in G-Buffers.
+	 * Sets the specified 2D texture as the depth buffer / Z-Buffer.
 	 *
-	 * \param d depth buffer texture
+	 * \param t depth texture
 	 */
-	void set_buffer_d(const Gpu::Texture* d);
+	void set_texture_depth(const Gpu::Texture* t);
 	
 private:
 	const Camera* camera = nullptr;
 	
 	const Gpu::Texture* map = nullptr;
-	const Gpu::Texture* buffer_n = nullptr;
-	const Gpu::Texture* buffer_d = nullptr;
+	const Gpu::Texture* g_normal = nullptr;
+	const Gpu::Texture* z_map = nullptr;
 	
 	std::unique_ptr<Gpu::Texture> blur_map_1;
 	std::unique_ptr<Gpu::Texture> blur_map_2;
@@ -6212,7 +6012,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the camera represents the input of rendering pass.
@@ -6241,47 +6041,47 @@ public:
 	/**
 	 * Returns the 2D texture represents the world normal buffer in G-Buffers.
 	 */
-	const Gpu::Texture* get_buffer_n() const;
+	const Gpu::Texture* get_texture_normal() const;
 	
 	/**
 	 * Sets the specified 2D texture as the world normal buffer in G-Buffers.
 	 *
-	 * \param n normal buffer texture
+	 * \param n world normal texture
 	 */
-	void set_buffer_n(const Gpu::Texture* n);
+	void set_texture_normal(const Gpu::Texture* n);
 	
 	/**
 	 * Returns the 2D texture represents the material buffer in G-Buffers.
 	 */
-	const Gpu::Texture* get_buffer_m() const;
+	const Gpu::Texture* get_texture_material() const;
 	
 	/**
 	 * Sets the specified 2D texture as the material buffer in G-Buffers.
 	 *
-	 * \param m material buffer texture
+	 * \param t material data texture
 	 */
-	void set_buffer_m(const Gpu::Texture* m);
+	void set_texture_material(const Gpu::Texture* t);
 	
 	/**
-	 * Returns the 2D texture represents the depth buffer in G-Buffers.
+	 * Returns the 2D texture represents the depth buffer / Z-Buffer.
 	 */
-	const Gpu::Texture* get_buffer_d() const;
+	const Gpu::Texture* get_texture_depth() const;
 	
 	/**
-	 * Sets the specified 2D texture as the depth buffer in G-Buffers. Insures
-	 * the texture is set to linear filtering.
+	 * Sets the specified 2D texture as the depth buffer / Z-Buffer. Insures the
+	 * texture is set to linear filtering.
 	 *
-	 * \param d G-Buffer depth buffer
+	 * \param t depth buffer
 	 */
-	void set_buffer_d(const Gpu::Texture* d);
+	void set_texture_depth(const Gpu::Texture* t);
 	
 private:
 	const Camera* camera = nullptr;
 	
 	const Gpu::Texture* map = nullptr;
-	const Gpu::Texture* buffer_n = nullptr;
-	const Gpu::Texture* buffer_m = nullptr;
-	const Gpu::Texture* buffer_d = nullptr;
+	const Gpu::Texture* g_normal = nullptr;
+	const Gpu::Texture* g_material = nullptr;
+	const Gpu::Texture* z_map = nullptr;
 };
 
 }
@@ -6326,7 +6126,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the 2D texture represents the input of rendering pass.
@@ -6372,7 +6172,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the 2D texture represents the input of rendering pass.
@@ -6416,7 +6216,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the 2D texture represents the input of rendering pass.
@@ -6460,7 +6260,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the 2D texture represents the input of rendering pass.
@@ -6507,7 +6307,7 @@ public:
 	/**
 	 * Compiles the required shaders and renders to the render target.
 	 */
-	void render() const override;
+	void render() override;
 	
 	/**
 	 * Returns the 2D texture represents the input of rendering pass.
@@ -6855,130 +6655,6 @@ private:
 }
 
 /* -------------------------------------------------------------------------- */
-/* ---- ink/physics/Physics.h ----------------------------------------------- */
-/* -------------------------------------------------------------------------- */
-
-namespace Ink {
-
-class CollisionBox {
-public:
-	Vec3 v1;    /**< upper-left-front vertex */
-	Vec3 v2;    /**< lower-right-back vertex */
-	
-	/**
-	 * Creates a new CollisionBox object.
-	 */
-	explicit CollisionBox() = default;
-	
-	/**
-	 * Creates a new CollisionBox object and initializes it with vertices.
-	 *
-	 * \param v1 upper-left-front vertex
-	 * \param v2 lower-right-back vertex
-	 */
-	explicit CollisionBox(const Vec3& v1, const Vec3& v2);
-	
-	/**
-	 * Sets the specified position and size of the box.
-	 *
-	 * \param v the center of box
-	 * \param w the width of box
-	 * \param h the height of box
-	 * \param d the depth of box
-	 */
-	void set(const Vec3& v, float w, float h, float d);
-	
-	/**
-	 * Returns true if the point is contained within the box region.
-	 *
-	 * \param v point
-	 */
-	bool contain(const Vec3& v) const;
-	
-	/**
-	 * Returns true if the point is contained within the box region.
-	 *
-	 * \param x the x-coordinate of point
-	 * \param y the y-coordinate of point
-	 * \param z the z-coordinate of point
-	 */
-	bool contain(float x, float y, float z) const;
-	
-	/**
-	 * Returns true if this box is hit by the specified box.
-	 *
-	 * \param b collision box
-	 */
-	bool hittest(const CollisionBox& b) const;
-};
-
-class Solid {
-public:
-	CollisionBox box;      /**< collision box */
-	
-	Vec3 position;         /**< the position of box */
-	
-	float width = 0;       /**< the width of box */
-	float height = 0;      /**< the height of box */
-	float depth = 0;       /**< the depth of box */
-	
-	/**
-	 * Create a new Solid object.
-	 */
-	explicit Solid() = default;
-	
-	/**
-	 * Create a new Solid object and initializes it with position, width, height
-	 * and depth.
-	 *
-	 * \param p center position
-	 * \param w the width of box
-	 * \param h the height of box
-	 * \param d the depth of box
-	 */
-	explicit Solid(const Vec3& p, float w, float h, float d);
-	
-	/**
-	 * Activates this solid.
-	 */
-	void activate();
-	
-	/**
-	 * Deactivates this solid.
-	 */
-	void deactivate();
-	
-	/**
-	 * Refreshes the collision box with updated position and size.
-	 */
-	void refresh();
-	
-	/**
-	 * Moves the soild along with a single direction.
-	 *
-	 * \param s soild
-	 * \param x X-axis direction
-	 * \param y Y-axis direction
-	 * \param z Z-axis direction
-	 */
-	void collide(Solid* s, float x, float y, float z);
-	
-	/**
-	 * Moves the soild along with the specified direction.
-	 *
-	 * \param d direction
-	 */
-	void move(const Vec3& d);
-	
-private:
-	static float limit;
-	
-	static std::unordered_set<Solid*> world;
-};
-
-}
-
-/* -------------------------------------------------------------------------- */
 /* ---- ink/utils/ConvexHull.h ---------------------------------------------- */
 /* -------------------------------------------------------------------------- */
 
@@ -6997,13 +6673,6 @@ public:
 	 * \param v vertex
 	 */
 	void add_vertex(const Vec3& v);
-	
-	/**
-	 * Adds the specified vertex list to convex hull.
-	 *
-	 * \param v vertex list
-	 */
-	void add_vertices(const std::initializer_list<Vec3>& v);
 	
 	/**
 	 * Returns the number of vertices in convex hull.

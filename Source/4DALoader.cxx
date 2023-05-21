@@ -22,7 +22,7 @@
 
 #include "4DALoader.h"
 
-#include "External/Json/json.hpp"
+#include "json/json.hpp"
 
 #include "opencv2/opencv.hpp"
 
@@ -32,7 +32,7 @@ MultiViews T4DALoader::loadDataset(const std::string& path) {
 	std::ifstream stream(path + "/calibration.json", std::fstream::in);
 	
 	if (stream.fail()) {
-		std::cerr << "T4DALoader: Failed to load dataset\n";
+		std::cerr << "T4DALoader Error: Failed to load dataset\n";
 		return MultiViews();
 	}
 	
@@ -132,7 +132,7 @@ MultiViews T4DALoader::loadDataset(const std::string& path) {
 	stream = std::ifstream(detectionPath, std::fstream::in);
 	
 	if (stream.fail()) {
-		std::cerr << "T4DALoader: Failed to load detection data\n";
+		std::cerr << "T4DALoader Error: Failed to load detection data\n";
 		return MultiViews();
 	}
 	
@@ -151,7 +151,7 @@ MultiViews T4DALoader::loadDataset(const std::string& path) {
 			7, 18, 0 , 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
 		};
 	} else {
-		std::cerr << "T4DALoader: Unknown skeleton type\n";
+		std::cerr << "T4DALoader Error: Unknown skeleton type\n";
 		return MultiViews();
 	}
 	
@@ -164,7 +164,7 @@ MultiViews T4DALoader::loadDataset(const std::string& path) {
 		stream = std::ifstream(detectionPath, std::fstream::in);
 		
 		if (stream.fail()) {
-			std::cerr << "T4DALoader: Failed to load detection data\n";
+			std::cerr << "T4DALoader Error: Failed to load detection data\n";
 			return MultiViews();
 		}
 		
@@ -185,6 +185,7 @@ MultiViews T4DALoader::loadDataset(const std::string& path) {
 						stream >> value;
 						if (i == 0) jointChoices[j].uv.x = value * (screenSize.x - 1.f);
 						if (i == 1) jointChoices[j].uv.y = value * (screenSize.y - 1.f);
+						if (i == 2) jointChoices[j].conf = value;
 					}
 				}
 				
@@ -215,7 +216,7 @@ MultiPersonPoses T4DALoader::loadGroundTruth(const std::string& path) {
 	std::ifstream stream(path, std::fstream::in);
 	
 	if (stream.fail()) {
-		std::cerr << "T4DALoader: Failed to load ground truth\n";
+		std::cerr << "T4DALoader Error: Failed to load ground truth\n";
 		return MultiPersonPoses();
 	}
 	
@@ -253,7 +254,7 @@ MultiPersonPoses T4DALoader::loadGroundTruth(const std::string& path) {
 						default:
 							float hasJointF = 0;
 							stream >> hasJointF;
-							personPose.hasJoint[type] = fabs(hasJointF) > 1E-4;
+							personPose.hasJoint[type] = hasJointF != 0.;
 							break;
 					}
 				}

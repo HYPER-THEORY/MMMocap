@@ -75,6 +75,8 @@ private:
 	
 	std::vector<float> historyScores;
 	
+	std::vector<float> confs;
+	
 	std::vector<const Ink::Ray*> rays;
 	
 	std::unordered_map<unsigned int, float> maxBoneLengths;

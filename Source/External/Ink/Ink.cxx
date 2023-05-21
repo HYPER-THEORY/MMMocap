@@ -22,6 +22,14 @@
 
 #include "Ink.h"
 
+#define FMT_HEADER_ONLY
+#include "fmt/format.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
+#include "opengl/glad.h"
+
 #include <unordered_map>
 #include <algorithm>
 #include <cmath>
@@ -45,9 +53,14 @@ std::string Error::get() {
 	return message + '\n';
 }
 
-void Error::set(const std::string& e) {
-	if (callback) std::invoke(callback, e);
-	message = e;
+void Error::set(const std::string& m) {
+	message = m;
+	if (callback) std::invoke(callback, message);
+}
+
+void Error::set(const std::string& l, const std::string& m) {
+	message = l + " Error: " + m;
+	if (callback) std::invoke(callback, message);
 }
 
 void Error::clear() {
@@ -74,7 +87,7 @@ std::string File::read(const std::string& p) {
 	std::string content;
 	std::ifstream stream(p, std::fstream::in);
 	if (stream.fail()) {
-		Error::set("File: Error reading from file");
+		Error::set("File", "Failed to read from file");
 	}
 	stream.ignore(std::numeric_limits<std::streamsize>::max());
 	std::streamsize length = stream.gcount();
@@ -89,7 +102,7 @@ void File::write(const std::string& p, const std::string& c) {
 	std::ofstream stream(p, std::fstream::out);
 	stream.write(c.data(), c.size());
 	if (stream.fail()) {
-		Error::set("File: Error writing to file");
+		Error::set("File", "Failed to write to file");
 	}
 	stream.close();
 }
@@ -98,7 +111,7 @@ void File::write(const std::string& p, const char* c) {
 	std::ofstream stream(p, std::fstream::out);
 	stream.write(c, std::strlen(c));
 	if (stream.fail()) {
-		Error::set("File: Error writing to file");
+		Error::set("File", "Failed to write to file");
 	}
 	stream.close();
 }
@@ -107,7 +120,7 @@ void File::append(const std::string& p, const std::string& c) {
 	std::ofstream stream(p, std::fstream::out | std::fstream::app);
 	stream.write(c.data(), c.size());
 	if (stream.fail()) {
-		Error::set("File: Error appending to file");
+		Error::set("File", "Failed to append to file");
 	}
 	stream.close();
 }
@@ -116,16 +129,12 @@ void File::append(const std::string& p, const char* c) {
 	std::ofstream stream(p, std::fstream::out | std::fstream::app);
 	stream.write(c, std::strlen(c));
 	if (stream.fail()) {
-		Error::set("File: Error appending to file");
+		Error::set("File", "Failed to append to file");
 	}
 	stream.close();
 }
 
 }
-
-/* -------------------------------------------------------------------------- */
-/* ---- ink/core/Format.cxx ------------------------------------------------- */
-/* -------------------------------------------------------------------------- */
 
 /* -------------------------------------------------------------------------- */
 /* ---- ink/core/Date.cxx --------------------------------------------------- */
@@ -137,17 +146,8 @@ Date::Date(int year, int month, int day, int h, int m, int s, int ms) :
 year(year), month(month), day(day), hours(h), minutes(m), seconds(s), milliseconds(ms) {}
 
 std::string Date::format() const {
-	int date[6] = {
-		year, month + 1, day, hours, minutes, seconds
-	};
-	const char* delimiter = " -- ::";
-	std::string formatted = std::to_string(date[0]);
-	for (int i = 1; i < 6; ++i) {
-		formatted.append(1, delimiter[i]);
-		if (date[i] < 10) formatted.append(1, '0');
-		formatted.append(std::to_string(date[i]));
-	}
-	return formatted;
+	return fmt::format("{}-{:0>2}-{:0>2} {:0>2}:{:0>2}:{:0>2}",
+					   year, month + 1, day, hours, minutes, seconds);
 }
 
 long long Date::get_time() {
@@ -155,20 +155,22 @@ long long Date::get_time() {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 }
 
-Date Date::get_local() {
-	long long time_ms = get_time();
-	time_t time_s = time_ms / 1000;
+Date Date::get_local(long long t) {
+	if (t == -1) t = get_time();
+	int tm_ms = t % 1000;
+	time_t time_s = t / 1000;
 	std::tm local = *std::localtime(&time_s);
 	return Date(local.tm_year + 1900, local.tm_mon, local.tm_mday,
-				local.tm_hour, local.tm_min, local.tm_sec, time_ms % 1000);
+				local.tm_hour, local.tm_min, local.tm_sec, tm_ms);
 }
 
-Date Date::get_utc() {
-	long long time_ms = get_time();
-	time_t time_s = time_ms / 1000;
+Date Date::get_utc(long long t) {
+	if (t == -1) t = get_time();
+	int tm_ms = t % 1000;
+	time_t time_s = t / 1000;
 	std::tm local = *std::gmtime(&time_s);
 	return Date(local.tm_year + 1900, local.tm_mon, local.tm_mday,
-				local.tm_hour, local.tm_min, local.tm_sec, time_ms % 1000);
+				local.tm_hour, local.tm_min, local.tm_sec, tm_ms);
 }
 
 }
@@ -1496,56 +1498,6 @@ DMat4 inverse_4x4(const DMat4& m) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ---- ink/math/Euler.cxx -------------------------------------------------- */
-/* -------------------------------------------------------------------------- */
-
-namespace Ink {
-
-Euler::Euler(float x, float y, float z, EulerOrder o) :
-x(x), y(y), z(z), order(o) {}
-
-Euler::Euler(Vec3 r, EulerOrder o) :
-x(r.x), y(r.y), z(r.z), order(o) {}
-
-Mat3 Euler::to_rotation_matrix() const {
-	Mat3 rotation_x = {
-		1       , 0       , 0       ,
-		0       , cosf(x) , -sinf(x),
-		0       , sinf(x) , cosf(x) ,
-	};
-	Mat3 rotation_y = {
-		cosf(y) , 0       , sinf(y) ,
-		0       , 1       , 0       ,
-		-sinf(y), 0       , cosf(y) ,
-	};
-	Mat3 rotation_z = {
-		cosf(z) , -sinf(z), 0       ,
-		sinf(z) , cosf(z) , 0       ,
-		0       , 0       , 1       ,
-	};
-	if (order == EULER_XYZ) {
-		return rotation_x * rotation_y * rotation_z;
-	}
-	if (order == EULER_XZY) {
-		return rotation_x * rotation_z * rotation_y;
-	}
-	if (order == EULER_YXZ) {
-		return rotation_y * rotation_x * rotation_z;
-	}
-	if (order == EULER_YZX) {
-		return rotation_y * rotation_z * rotation_x;
-	}
-	if (order == EULER_ZXY) {
-		return rotation_z * rotation_x * rotation_y;
-	}
-	/*       ... EULER_ZYX */ {
-		return rotation_z * rotation_y * rotation_x;
-	}
-}
-
-}
-
-/* -------------------------------------------------------------------------- */
 /* ---- ink/math/Ray.cxx ---------------------------------------------------- */
 /* -------------------------------------------------------------------------- */
 
@@ -1598,12 +1550,162 @@ float Ray::intersect_triangle(const Vec3& a, const Vec3& b, const Vec3& c) const
 }
 
 /* -------------------------------------------------------------------------- */
+/* ---- ink/math/Euler.cxx -------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+
+namespace Ink {
+
+Euler::Euler(float x, float y, float z, EulerOrder o) :
+x(x), y(y), z(z), order(o) {}
+
+Euler::Euler(Vec3 r, EulerOrder o) :
+x(r.x), y(r.y), z(r.z), order(o) {}
+
+Mat3 Euler::to_rotation_matrix() const {
+	Mat3 rotation_x = {
+		1       , 0       , 0       ,
+		0       , cosf(x) , -sinf(x),
+		0       , sinf(x) , cosf(x) ,
+	};
+	Mat3 rotation_y = {
+		cosf(y) , 0       , sinf(y) ,
+		0       , 1       , 0       ,
+		-sinf(y), 0       , cosf(y) ,
+	};
+	Mat3 rotation_z = {
+		cosf(z) , -sinf(z), 0       ,
+		sinf(z) , cosf(z) , 0       ,
+		0       , 0       , 1       ,
+	};
+	if (order == EULER_XYZ) {
+		return rotation_x * rotation_y * rotation_z;
+	}
+	if (order == EULER_XZY) {
+		return rotation_x * rotation_z * rotation_y;
+	}
+	if (order == EULER_YXZ) {
+		return rotation_y * rotation_x * rotation_z;
+	}
+	if (order == EULER_YZX) {
+		return rotation_y * rotation_z * rotation_x;
+	}
+	if (order == EULER_ZXY) {
+		return rotation_z * rotation_x * rotation_y;
+	}
+	/*       ... EULER_ZYX */ {
+		return rotation_z * rotation_y * rotation_x;
+	}
+}
+
+}
+
+/* -------------------------------------------------------------------------- */
+/* ---- ink/math/Color.cxx -------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+
+namespace Ink {
+
+const Mat3 RGB_TO_XYZ = {
+	0.4124564, 0.3575761, 0.1804375,
+	0.2126729, 0.7151522, 0.0721750,
+	0.0193339, 0.1191920, 0.9503041
+};
+
+const Mat3 XYZ_TO_RGB = {
+	 3.2404542, -1.5371385, -0.4985314,
+	-0.9692660,  1.8760108,  0.0415560,
+	 0.0556434, -0.2040259,  1.0572252
+};
+
+const Vec3 HCY = {0.299, 0.587, 0.114};
+
+Vec3 Color::rgb_to_srgb(const Vec3& c) {
+	return {rgb_to_srgb(c.x), rgb_to_srgb(c.y), rgb_to_srgb(c.z)};
+}
+
+Vec3 Color::srgb_to_rgb(const Vec3& c) {
+	return {srgb_to_rgb(c.x), srgb_to_rgb(c.y), srgb_to_rgb(c.z)};
+}
+
+Vec3 Color::rgb_to_xyz(const Vec3& c) {
+	return RGB_TO_XYZ * c;
+}
+
+Vec3 Color::xyz_to_rgb(const Vec3& c) {
+	return XYZ_TO_RGB * c;
+}
+
+Vec3 Color::rgb_to_hsv(const Vec3& c) {
+	Vec3 hcv = rgb_to_hcv(c);
+	return {hcv.x, hcv.y / hcv.z, hcv.z};
+}
+
+Vec3 Color::hsv_to_rgb(const Vec3& c) {
+	return ((hue_to_rgb(c.x) - 1.f) * c.y + 1.f) * c.z;
+}
+
+Vec3 Color::rgb_to_hsl(const Vec3& c) {
+	Vec3 hcv = rgb_to_hcv(c);
+	float lum = hcv.z - hcv.y * 0.5f;
+	float sat = hcv.y / (1.f - fabsf(lum * 2.f - 1.f));
+	return {hcv.x, sat, lum};
+}
+
+Vec3 Color::hsl_to_rgb(const Vec3& c) {
+	return (hue_to_rgb(c.x) - 0.5f) * (1.f - fabsf(2.f * c.z - 1.f)) * c.y + c.z;
+}
+
+Vec3 Color::rgb_to_hcy(const Vec3& c) {
+	Vec3 hcv = rgb_to_hcv(c);
+	float y = HCY.dot(c);
+	float z = HCY.dot(hue_to_rgb(hcv.x));
+	hcv.y *= y < z ? z / y : (1.f - z) / (1.f - y);
+	return {hcv.x, hcv.y, y};
+}
+
+Vec3 Color::hcy_to_rgb(const Vec3& c) {
+	Vec3 rgb = hue_to_rgb(c.x);
+	float d = HCY.dot(rgb);
+	float y = c.y * (c.z < d ? c.z / d : d < 1.f ? (1.f - c.z) / (1.f - d) : 1.f);
+	return (rgb - d) * y + c.z;
+}
+
+float Color::saturate(float v) {
+	return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+float Color::rgb_to_srgb(float v) {
+	return v <= 0.0031308f ? v * 12.92f : powf(v, 1.f / 2.4f) * 1.055f - 0.055f;
+}
+
+float Color::srgb_to_rgb(float v) {
+	return v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
+}
+
+Vec3 Color::hue_to_rgb(float h) {
+	float r = fabsf(h * 6.f - 3.f) - 1.f;
+	float g = 2.f - fabsf(h * 6.f - 2.f);
+	float b = 2.f - fabsf(h * 6.f - 4.f);
+	return {saturate(r), saturate(g), saturate(b)};
+}
+
+Vec3 Color::rgb_to_hcv(const Vec3& c) {
+	Vec4 p = c.y < c.z ? Vec4(c.z, c.y, -1.f, 2.f / 3.f) : Vec4(c.y, c.z, 0.f, -1.f / 3.f);
+	Vec4 q = c.x < p.x ? Vec4(p.x, p.y, p.w, c.x) : Vec4(c.x, p.y, p.z, p.x);
+	float chr = q.x - fminf(q.w, q.y);
+	float hue = fabsf((q.w - q.y) / (6.f * chr) + q.z);
+	return {hue, chr, q.x};
+}
+
+}
+
+/* -------------------------------------------------------------------------- */
 /* ---- ink/objects/Uniforms.cxx -------------------------------------------- */
 /* -------------------------------------------------------------------------- */
 
 namespace Ink {
 
-size_t Uniforms::count() const {
+size_t Uniforms::get_count() const {
 	return unifroms.size();
 }
 
@@ -1690,6 +1792,11 @@ void Uniforms::set_m4(const std::string& n, const Mat4& v) {
 	std::copy_n(&v[0][0], 16, data.data() + size);
 }
 
+void Uniforms::clear() {
+	unifroms.clear();
+	data.clear();
+}
+
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1728,6 +1835,10 @@ void Defines::set_ll(const std::string& n, long long v) {
 
 void Defines::set_if(const std::string& n, bool f) {
 	if (f) defines += "#define " + n + "\n";
+}
+
+void Defines::clear() {
+	defines.clear();
 }
 
 }
@@ -1874,7 +1985,7 @@ void Mesh::normalize() {
 
 void Mesh::create_normals() {
 	if (vertex.empty()) {
-		return Error::set("Mesh: Vertex information is missing");
+		return Error::set("Mesh", "Vertex information is missing");
 	}
 	size_t size = vertex.size();
 	normal.resize(size);
@@ -1883,7 +1994,6 @@ void Mesh::create_normals() {
 		Vec3 v1 = vertex[i + 1] - vertex[i];
 		Vec3 v2 = vertex[i + 2] - vertex[i];
 		Vec3 face_normal = v1.cross(v2);
-		if (face_normal.magnitude() < 1E-4) continue;
 		for (int j = i; j < i + 3; ++j) {
 			std::string hash = (vertex[j] + Vec3(0.005)).to_string(2);
 			if (normals.count(hash) == 0) normals.insert({hash, {}});
@@ -1901,13 +2011,13 @@ void Mesh::create_normals() {
 
 void Mesh::create_tangents() {
 	if (vertex.empty()) {
-		return Error::set("Mesh: Vertex information is missing");
+		return Error::set("Mesh", "Vertex information is missing");
 	}
 	if (uv.empty()) {
-		return Error::set("Mesh: UV information is missing");
+		return Error::set("Mesh", "UV information is missing");
 	}
 	if (normal.empty()) {
-		return Error::set("Mesh: Normal information is missing");
+		return Error::set("Mesh", "Normal information is missing");
 	}
 	size_t size = vertex.size();
 	tangent.resize(size);
@@ -1936,10 +2046,6 @@ void Mesh::create_tangents() {
 
 namespace Ink {
 
-constexpr float ONE_BY_255 = 1.f / 255.f;
-
-const Vec3 W_HCY = {0.299, 0.587, 0.114};
-
 Image::Image(int w, int h, int c, int b) :
 width(w), height(h), channel(c), bytes(b) {
 	data.resize(w * h * c * b);
@@ -1951,7 +2057,7 @@ Image Image::subimage(int x1, int y1, int x2, int y2) {
 	
 	/* check whether the sub-image region is legal */
 	if (x1 < 0 || x2 > width || y1 < 0 || y2 > height) {
-		Error::set("Image: Illegal slicing region");
+		Error::set("Image", "Illegal slicing region");
 	}
 	
 	/* create a new image */
@@ -2027,7 +2133,7 @@ std::vector<Image> Image::split() const {
 void Image::convert(ColorConversion c) {
 	/* check the number of channels */
 	if (channel != 3 && channel != 4) {
-		return Error::set("Image: Image's channel must be 3 or 4");
+		return Error::set("Image", "Image's channel must be 3 or 4");
 	}
 	
 	/* convert from RGB color space to BGR color space */
@@ -2145,7 +2251,7 @@ void Image::convert_rgb_to_bgr() {
 	Type* ptr_r = reinterpret_cast<Type*>(data.data());
 	Type* ptr_b = ptr_r + 2;
 	
-	/* swap the red channel and blur channel */
+	/* swap the red and blue channel */
 	int i = width * height;
 	while (i --> 0) {
 		std::swap(ptr_r[channel * i], ptr_b[channel * i]);
@@ -2158,7 +2264,7 @@ void Image::convert_bgr_to_rgb() {
 	Type* ptr_r = reinterpret_cast<Type*>(data.data());
 	Type* ptr_b = ptr_r + 2;
 	
-	/* swap the red channel and blur channel */
+	/* swap the red and blue channel */
 	int i = width * height;
 	while (i --> 0) {
 		std::swap(ptr_r[channel * i], ptr_b[channel * i]);
@@ -2168,42 +2274,52 @@ void Image::convert_bgr_to_rgb() {
 template <typename Type>
 void Image::convert_rgb_to_srgb() {
 	/* get pointer of the specified data type */
-	Type* ptr = reinterpret_cast<Type*>(data.data());
+	Type* ptr_r = reinterpret_cast<Type*>(data.data());
+	Type* ptr_g = ptr_r + 1;
+	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
-	int i = width * height * channel;
+	Vec3 color;
+	int i = width * height;
 	while (i --> 0) {
-		/* unpack color information from data */
-		float color = unpack<Type>(ptr[i]);
+		/* unpack RGB information from data */
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
 		/* convert to SRGB color space */
-		if (color <= 0.0031308f) {
-			color *= 12.92f;
-		} else {
-			color = powf(color, 1.f / 2.4f) * 1.055f - 0.055f;
-		}
-		ptr[i] = pack<Type>(color);
+		color = Color::rgb_to_srgb(color);
+		
+		/* pack SRGB color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
 template <typename Type>
 void Image::convert_srgb_to_rgb() {
 	/* get pointer of the specified data type */
-	Type* ptr = reinterpret_cast<Type*>(data.data());
+	Type* ptr_r = reinterpret_cast<Type*>(data.data());
+	Type* ptr_g = ptr_r + 1;
+	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
-	int i = width * height * channel;
+	Vec3 color;
+	int i = width * height;
 	while (i --> 0) {
-		/* unpack color information from data */
-		float color = unpack<Type>(ptr[i]);
+		/* unpack SRGB information from data */
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
-		/* convert to SRGB color space */
-		if (color <= 0.04045f) {
-			color /= 12.92f;
-		} else {
-			color = powf((color + 0.055f) / 1.055f, 2.4f);
-		}
-		ptr[i] = pack<Type>(color);
+		/* convert to RGB color space */
+		color = Color::srgb_to_rgb(color);
+		
+		/* pack RGB color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
@@ -2215,17 +2331,21 @@ void Image::convert_rgb_to_xyz() {
 	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
+	Vec3 color;
 	int i = width * height;
 	while (i --> 0) {
 		/* unpack RGB information from data */
-		float r = unpack<Type>(ptr_r[channel * i]);
-		float g = unpack<Type>(ptr_g[channel * i]);
-		float b = unpack<Type>(ptr_b[channel * i]);
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
 		/* convert to XYZ color space */
-		ptr_r[channel * i] = pack<Type>(r * 0.4124564f + g * 0.3575761f + b * 0.1804375f);
-		ptr_g[channel * i] = pack<Type>(r * 0.2126729f + g * 0.7151522f + b * 0.0721750f);
-		ptr_b[channel * i] = pack<Type>(r * 0.0193339f + g * 0.1191920f + b * 0.9503041f);
+		color = Color::rgb_to_xyz(color);
+		
+		/* pack XYZ color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
@@ -2237,17 +2357,21 @@ void Image::convert_xyz_to_rgb() {
 	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
+	Vec3 color;
 	int i = width * height;
 	while (i --> 0) {
 		/* unpack XYZ information from data */
-		float x = unpack<Type>(ptr_r[channel * i]);
-		float y = unpack<Type>(ptr_g[channel * i]);
-		float z = unpack<Type>(ptr_b[channel * i]);
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
 		/* convert to RGB color space */
-		ptr_r[channel * i] = pack<Type>(x * 3.2404542f + y * -1.5371385f + z * -0.4985314f);
-		ptr_g[channel * i] = pack<Type>(x * -0.9692660f + y * 1.8760108f + z * 0.0415560f);
-		ptr_b[channel * i] = pack<Type>(x * 0.0556434f + y * -0.2040259f + z * 1.0572252f);
+		color = Color::xyz_to_rgb(color);
+		
+		/* pack RGB color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
@@ -2259,18 +2383,21 @@ void Image::convert_rgb_to_hsv() {
 	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
+	Vec3 color;
 	int i = width * height;
 	while (i --> 0) {
 		/* unpack RGB information from data */
-		float r = unpack<Type>(ptr_r[channel * i]);
-		float g = unpack<Type>(ptr_g[channel * i]);
-		float b = unpack<Type>(ptr_b[channel * i]);
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
 		/* convert to HSV color space */
-		Vec3 hcv = rgb_to_hcv(r, g, b);
-		ptr_r[channel * i] = pack<Type>(hcv.x);
-		ptr_g[channel * i] = pack<Type>(hcv.y / hcv.z);
-		ptr_b[channel * i] = pack<Type>(hcv.z);
+		color = Color::rgb_to_hsv(color);
+		
+		/* pack HSV color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
@@ -2282,18 +2409,21 @@ void Image::convert_hsv_to_rgb() {
 	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
+	Vec3 color;
 	int i = width * height;
 	while (i --> 0) {
 		/* unpack HSV information from data */
-		float x = unpack<Type>(ptr_r[channel * i]);
-		float y = unpack<Type>(ptr_g[channel * i]);
-		float z = unpack<Type>(ptr_b[channel * i]);
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
 		/* convert to RGB color space */
-		Vec3 rgb = ((hue_to_rgb(x) - 1.f) * y + 1.f) * z;
-		ptr_r[channel * i] = pack<Type>(rgb.x);
-		ptr_g[channel * i] = pack<Type>(rgb.y);
-		ptr_b[channel * i] = pack<Type>(rgb.z);
+		color = Color::hsv_to_rgb(color);
+		
+		/* pack RGB color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
@@ -2305,20 +2435,21 @@ void Image::convert_rgb_to_hsl() {
 	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
+	Vec3 color;
 	int i = width * height;
 	while (i --> 0) {
 		/* unpack RGB information from data */
-		float r = unpack<Type>(ptr_r[channel * i]);
-		float g = unpack<Type>(ptr_g[channel * i]);
-		float b = unpack<Type>(ptr_b[channel * i]);
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
 		/* convert to HSL color space */
-		Vec3 hcv = rgb_to_hcv(r, g, b);
-		float l = hcv.z - hcv.y * 0.5f;
-		float s = hcv.y / (1.f - fabsf(l * 2.f - 1.f));
-		ptr_r[channel * i] = pack<Type>(hcv.x);
-		ptr_g[channel * i] = pack<Type>(s);
-		ptr_b[channel * i] = pack<Type>(l);
+		color = Color::rgb_to_hsl(color);
+		
+		/* pack HSL color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
@@ -2330,19 +2461,21 @@ void Image::convert_hsl_to_rgb() {
 	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
+	Vec3 color;
 	int i = width * height;
 	while (i --> 0) {
 		/* unpack HSL information from data */
-		float x = unpack<Type>(ptr_r[channel * i]);
-		float y = unpack<Type>(ptr_g[channel * i]);
-		float z = unpack<Type>(ptr_b[channel * i]);
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
 		/* convert to RGB color space */
-		float c = (1.f - fabsf(2.f * z - 1.f)) * y;
-		Vec3 rgb = (hue_to_rgb(x) - 0.5f) * c + z;
-		ptr_r[channel * i] = pack<Type>(rgb.x);
-		ptr_g[channel * i] = pack<Type>(rgb.y);
-		ptr_b[channel * i] = pack<Type>(rgb.z);
+		color = Color::hsl_to_rgb(color);
+		
+		/* pack RGB color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
@@ -2354,21 +2487,21 @@ void Image::convert_rgb_to_hcy() {
 	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
+	Vec3 color;
 	int i = width * height;
 	while (i --> 0) {
 		/* unpack RGB information from data */
-		float r = unpack<Type>(ptr_r[channel * i]);
-		float g = unpack<Type>(ptr_g[channel * i]);
-		float b = unpack<Type>(ptr_b[channel * i]);
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
 		/* convert to HCY color space */
-		Vec3 hcv = rgb_to_hcv(r, g, b);
-		float y = W_HCY.dot({r, g, b});
-		float z = W_HCY.dot(hue_to_rgb(hcv.x));
-		hcv.y *= y < z ? z / y : (1.f - z) / (1.f - y);
-		ptr_r[channel * i] = pack<Type>(hcv.x);
-		ptr_g[channel * i] = pack<Type>(hcv.y);
-		ptr_b[channel * i] = pack<Type>(y);
+		color = Color::rgb_to_hcy(color);
+		
+		/* pack HCY color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
@@ -2380,53 +2513,34 @@ void Image::convert_hcy_to_rgb() {
 	Type* ptr_b = ptr_g + 1;
 	
 	/* convert colorspace */
+	Vec3 color;
 	int i = width * height;
 	while (i --> 0) {
-		/* unpack HSL information from data */
-		float x = unpack<Type>(ptr_r[channel * i]);
-		float y = unpack<Type>(ptr_g[channel * i]);
-		float z = unpack<Type>(ptr_b[channel * i]);
+		/* unpack HCY information from data */
+		color.x = unpack<Type>(ptr_r[channel * i]);
+		color.y = unpack<Type>(ptr_g[channel * i]);
+		color.z = unpack<Type>(ptr_b[channel * i]);
 		
 		/* convert to RGB color space */
-		Vec3 rgb = hue_to_rgb(x);
-		float d = W_HCY.dot(rgb);
-		y *= z < d ? z / d : d < 1.f ? (1.f - z) / (1.f - d) : 1.f;
-		rgb = (rgb - d) * y + z;
-		ptr_r[channel * i] = pack<Type>(rgb.x);
-		ptr_g[channel * i] = pack<Type>(rgb.y);
-		ptr_b[channel * i] = pack<Type>(rgb.z);
+		color = Color::hcy_to_rgb(color);
+		
+		/* pack RGB color to data */
+		ptr_r[channel * i] = pack<Type>(color.x);
+		ptr_g[channel * i] = pack<Type>(color.y);
+		ptr_b[channel * i] = pack<Type>(color.z);
 	}
 }
 
 template <typename Type>
 float Image::unpack(Type v) {
-	if (typeid(Type) == typeid(float)) return v;
-	return v * ONE_BY_255;
+	if constexpr (std::is_same_v<Type, float>) return v;
+	return v / 255.f;
 }
 
 template <typename Type>
 Type Image::pack(float v) {
-	if (typeid(Type) == typeid(float)) return v;
-	return roundf(saturate(v) * 255.f);
-}
-
-float Image::saturate(float v) {
-	return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
-Vec3 Image::rgb_to_hcv(float r, float g, float b) {
-	Vec4 p = g < b ? Vec4(b, g, -1.f, 2.f / 3.f) : Vec4(g, b, 0.f, -1.f / 3.f);
-	Vec4 q = r < p.x ? Vec4(p.x, p.y, p.w, r) : Vec4(r, p.y, p.z, p.x);
-	float c = q.x - fminf(q.w, q.y);
-	float h = fabsf((q.w - q.y) / (6.f * c) + q.z);
-	return {h, c, q.x};
-}
-
-Vec3 Image::hue_to_rgb(float h) {
-	float r = fabsf(h * 6.f - 3.f) - 1.f;
-	float g = 2.f - fabsf(h * 6.f - 2.f);
-	float b = 2.f - fabsf(h * 6.f - 4.f);
-	return {saturate(r), saturate(g), saturate(b)};
+	if constexpr (std::is_same_v<Type, float>) return v;
+	return v < 0 ? 0 : v > 1 ? 255 : roundf(v * 255.f);
 }
 
 }
@@ -2437,25 +2551,36 @@ Vec3 Image::hue_to_rgb(float h) {
 
 namespace Ink {
 
-Material::Material(const std::string& n) : name(n) {}
-
-Image* Material::get_image(int i) const {
-	if (images.count(i) == 0) {
-		return nullptr;
-	}
-	return images.at(i);
-}
-
-void Material::set_image(int i, Image* c) {
-	images.insert_or_assign(i, c);
-}
-
-void Material::remove_image(int i) {
-	images.erase(i);
-}
-
-void Material::clear_images() {
-	images.clear();
+Material::Material(const std::string& n) : name(n) {
+	custom_maps[0]  = nullptr;
+	custom_maps[1]  = nullptr;
+	custom_maps[2]  = nullptr;
+	custom_maps[3]  = nullptr;
+	custom_maps[4]  = nullptr;
+	custom_maps[5]  = nullptr;
+	custom_maps[6]  = nullptr;
+	custom_maps[7]  = nullptr;
+	custom_maps[8]  = nullptr;
+	custom_maps[9]  = nullptr;
+	custom_maps[10] = nullptr;
+	custom_maps[11] = nullptr;
+	custom_maps[12] = nullptr;
+	custom_maps[13] = nullptr;
+	custom_maps[14] = nullptr;
+	custom_maps[15] = nullptr;
+	side            = FRONT_SIDE;
+	shadow_side     = BACK_SIDE;
+	depth_func      = FUNC_LEQUAL;
+	stencil_func    = FUNC_ALWAYS;
+	stencil_fail    = STENCIL_KEEP;
+	stencil_zfail   = STENCIL_KEEP;
+	stencil_zpass   = STENCIL_KEEP;
+	blend_op_rgb    = BLEND_ADD;
+	blend_op_alpha  = BLEND_ADD;
+	blend_src_rgb   = FACTOR_SRC_ALPHA;
+	blend_src_alpha = FACTOR_SRC_ALPHA;
+	blend_dst_rgb   = FACTOR_ONE_MINUS_SRC_ALPHA;
+	blend_dst_alpha = FACTOR_ONE_MINUS_SRC_ALPHA;
 }
 
 }
@@ -2467,14 +2592,6 @@ void Material::clear_images() {
 namespace Ink {
 
 Instance::Instance(const std::string& n) : name(n) {}
-
-Instance* Instance::create(const std::string& n) {
-	return new Instance(n);
-}
-
-void Instance::destroy(const Instance* i) {
-	delete i;
-}
 
 void Instance::add(Instance* i) {
 	i->parent = this;
@@ -2586,9 +2703,6 @@ Mat4 Instance::transform(const Vec3& p, const Euler& r, const Vec3& s) {
 /* ---- ink/loader/Loader.cxx ----------------------------------------------- */
 /* -------------------------------------------------------------------------- */
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "libs/stb/stb_image.h"
-
 namespace Ink {
 
 Image Loader::load_image(const std::string& p) {
@@ -2598,7 +2712,7 @@ Image Loader::load_image(const std::string& p) {
 	/* get image data from file */
 	auto* image_ptr = stbi_load(p.c_str(), &image.width, &image.height, &image.channel, 0);
 	if (image_ptr == nullptr) {
-		Error::set("Loader: Error reading from image");
+		Error::set("Loader", "Failed to read from image");
 		return Image();
 	}
 	
@@ -2618,7 +2732,7 @@ Image Loader::load_image_hdr(const std::string& p) {
 	/* get image data from file */
 	auto* image_ptr = stbi_loadf(p.c_str(), &image.width, &image.height, &image.channel, 0);
 	if (image_ptr == nullptr) {
-		Error::set("Loader: Error reading from image");
+		Error::set("Loader", "Failed to read from image");
 		return Image();
 	}
 	
@@ -2631,26 +2745,95 @@ Image Loader::load_image_hdr(const std::string& p) {
 	return image;
 }
 
-std::vector<Mesh> Loader::load_obj(const std::string& p, const std::string& g) {
+LoadObject Loader::load_mtl(const std::string& p) {
 	/* prepare the file stream */
 	std::ifstream stream;
 	stream.open(p, std::ifstream::in);
 	if (stream.fail()) {
-		Error::set("Loader: Error reading from obj file");
-		return std::vector<Mesh>();
+		Error::set("Loader", "Failed to read from mtl file");
+		return LoadObject();
 	}
-	size_t stream_max = std::numeric_limits<std::streamsize>::max();
+	size_t streamsize_max = std::numeric_limits<std::streamsize>::max();
+	
+	/* initialize load object */
+	LoadObject object;
+	Material* current_material = nullptr;
+	
+	/* read data by line */
+	while (!stream.eof()) {
+		std::string keyword;
+		stream >> keyword;
+		
+		/* create a new material */
+		if (keyword == "newmtl") {
+			std::string name;
+			stream >> name;
+			current_material = &object.materials.emplace_back(Material(name));
+		}
+		
+		/* material is not declared */
+		else if (current_material == nullptr) {}
+		
+		/* Kd: diffuse color */
+		else if (keyword == "Kd") {
+			Vec3 kd;
+			stream >> kd.x >> kd.y >> kd.z;
+			current_material->color = kd;
+		}
+		
+		/* Ke: emissive color */
+		else if (keyword == "Ke") {
+			Vec3 ke;
+			stream >> ke.x >> ke.y >> ke.z;
+			current_material->emissive = ke;
+		}
+		
+		/* d: dissolve factor */
+		else if (keyword == "d") {
+			float d;
+			stream >> d;
+			current_material->alpha = d;
+		}
+		
+		/* tr: transparency factor */
+		else if (keyword == "tr") {
+			float tr;
+			stream >> tr;
+			current_material->alpha = 1 - tr;
+		}
+		
+		/* ignore unknown keyword */
+		else {
+			stream.ignore(streamsize_max, '\n');
+		}
+	}
+	
+	/* close file stream */
+	stream.close();
+	
+	/* return the load object */
+	return object;
+}
+
+LoadObject Loader::load_obj(const std::string& p, const ObjOptions& o) {
+	/* prepare the file stream */
+	std::ifstream stream;
+	stream.open(p, std::ifstream::in);
+	if (stream.fail()) {
+		Error::set("Loader", "Failed to read from obj file");
+		return LoadObject();
+	}
+	size_t streamsize_max = std::numeric_limits<std::streamsize>::max();
 	
 	/* temporary data */
 	std::vector<Vec3> vertex;
-	std::vector<Vec3> color;
 	std::vector<Vec3> normal;
 	std::vector<Vec2> uv;
+	std::vector<Vec3> color;
 	
-	/* initialize mesh vector */
-	std::vector<Mesh> meshes;
-	meshes.emplace_back(Mesh("default"));
-	Mesh* current_mesh = &meshes.back();
+	/* initialize load object */
+	LoadObject object;
+	Mesh* current_mesh = &object.meshes.emplace_back(Mesh("default"));
 	
 	/* initialize mesh group pointer */
 	current_mesh->groups.emplace_back<MeshGroup>({"default", 0, 0});
@@ -2669,6 +2852,10 @@ std::vector<Mesh> Loader::load_obj(const std::string& p, const std::string& g) {
 			Vec3 v;
 			stream >> v.x >> v.y >> v.z;
 			vertex.emplace_back(v);
+			if (o.vertex_color) {
+				stream >> v.x >> v.y >> v.z;
+				color.emplace_back(v);
+			}
 		}
 		
 		/* add normal to temporary array */
@@ -2691,14 +2878,20 @@ std::vector<Mesh> Loader::load_obj(const std::string& p, const std::string& g) {
 			for (int i = 0; i < 3; ++i) {
 				stream >> index;
 				current_mesh->vertex.emplace_back(vertex[index - 1]);
-				stream.get();
+				if (o.vertex_color) {
+					current_mesh->color.emplace_back(color[index - 1]);
+				}
 				
 				/* check whether uv is omitted */
+				if (stream.peek() != '/') continue;
+				stream.get();
 				if (std::isdigit(stream.peek())) {
 					stream >> index;
 					current_mesh->uv.emplace_back(uv[index - 1]);
 				}
 				
+				/* check whether normal is omitted */
+				if (stream.peek() != '/') continue;
 				stream.get();
 				stream >> index;
 				current_mesh->normal.emplace_back(normal[index - 1]);
@@ -2710,7 +2903,7 @@ std::vector<Mesh> Loader::load_obj(const std::string& p, const std::string& g) {
 		}
 		
 		/* create new mesh object and initialize everything */
-		else if (keyword == g) {
+		else if (keyword == o.group) {
 			std::string name;
 			stream >> name;
 			
@@ -2724,15 +2917,13 @@ std::vector<Mesh> Loader::load_obj(const std::string& p, const std::string& g) {
 			total_length = 0;
 			
 			/* create new mesh object */
-			meshes.emplace_back(Mesh(name));
-			current_mesh = &meshes.back();
+			current_mesh = &object.meshes.emplace_back(Mesh(name));
 			
 			/* create new mesh group */
-			current_mesh->groups.emplace_back<MeshGroup>({name, total_length, 0});
-			current_group = &current_mesh->groups.back();
+			current_group = &current_mesh->groups.emplace_back(MeshGroup{name, total_length, 0});
 		}
 		
-		/* use material */
+		/* create new mesh group */
 		else if (keyword == "usemtl") {
 			std::string name;
 			stream >> name;
@@ -2744,112 +2935,20 @@ std::vector<Mesh> Loader::load_obj(const std::string& p, const std::string& g) {
 			}
 			
 			/* create new mesh group */
-			current_mesh->groups.emplace_back<MeshGroup>({name, total_length, 0});
-			current_group = &current_mesh->groups.back();
+			current_group = &current_mesh->groups.emplace_back(MeshGroup{name, total_length, 0});
 		}
 		
-		/* ignore */
+		/* ignore unknown keyword */
 		else {
-			stream.ignore(stream_max, '\n');
+			stream.ignore(streamsize_max, '\n');
 		}
 	}
 	
 	/* close file stream */
 	stream.close();
 	
-	/* return the number of meshes */
-	return meshes;
-}
-
-std::vector<Material> Loader::load_mtl(const std::string& p) {
-	/* prepare the file stream */
-	std::ifstream stream;
-	stream.open(p, std::ifstream::in);
-	if (!stream) {
-		Error::set("Loader: Error reading from mtl file");
-		return std::vector<Material>();
-	}
-	size_t stream_max = std::numeric_limits<std::streamsize>::max();
-	
-	/* initialize material pointer */
-	std::vector<Material> materials;
-	Material* current_material = nullptr;
-	
-	/* read data by line */
-	while (!stream.eof()) {
-		std::string keyword;
-		stream >> keyword;
-		
-		/* create a new material */
-		if (keyword == "newmtl") {
-			std::string name;
-			stream >> name;
-			materials.emplace_back(Material(name));
-			current_material = &materials.back();
-		}
-		
-		/* material is not declared */
-		else if (current_material == nullptr) {}
-		
-		/* diffuse color */
-		else if (keyword == "Kd") {
-			Vec3 kd;
-			stream >> kd.x >> kd.y >> kd.z;
-			current_material->color = kd;
-		}
-		
-		/* emissive color */
-		else if (keyword == "Ke") {
-			Vec3 ke;
-			stream >> ke.x >> ke.y >> ke.z;
-			current_material->emissive = ke;
-		}
-		
-		/* dissolve factor */
-		else if (keyword == "d") {
-			float d;
-			stream >> d;
-			current_material->alpha = d;
-		}
-		
-		/* transparency factor */
-		else if (keyword == "tr") {
-			float tr;
-			stream >> tr;
-			current_material->alpha = 1 - tr;
-		}
-		
-		/* not used in PBR material */
-		
-		/* ambient color */
-		/* else if (keyword == "Ka") {} */
-		
-		/* specular color */
-		/* else if (keyword == "Ks") {} */
-		
-		/* transmission color */
-		/* else if (keyword == "Tf") {} */
-		
-		/* specular exponent */
-		/* else if (keyword == "Ns") {} */
-		
-		/* optical density */
-		/* else if (keyword == "Ni") {} */
-		
-		/* sharpness value */
-		/* else if (keyword == "sharpness") {} */
-		
-		/* ignore */
-		else {
-			stream.ignore(stream_max, '\n');
-		}
-	}
-	
-	/* close file stream */
-	stream.close();
-	
-	/* return the number of materials */
-	return materials;
+	/* return the load object */
+	return object;
 }
 
 }
@@ -5756,277 +5855,8 @@ std::vector<Vec3> SphereMesh::normal = {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ---- ink/graphics/Software.cxx ------------------------------------------- */
-/* -------------------------------------------------------------------------- */
-
-#ifndef LIKELY
-#define	LIKELY(x)   __builtin_expect((x), 1)
-#endif
-
-#ifndef UNLIKELY
-#define	UNLIKELY(x) __builtin_expect((x), 0)
-#endif
-
-namespace Ink::Soft {
-
-constexpr float EPS = 1E-6;
-
-void PointList::add_point(const Vec4& v, const Vec3& b) {
-	vertices[size] = v;
-	barycenters[size] = b;
-	++size;
-}
-
-std::pair<int, int> get_viewport() {
-	return {viewport_w, viewport_h};
-}
-
-void set_viewport(int w, int h) {
-	viewport_w = w;
-	viewport_h = h;
-}
-
-void znear_clip(const PointList& i, float z, PointList& o) {
-	for (int l = 0; l < i.size; ++l) {
-		Vec4& vertex1 = i.vertices[l];
-		Vec4& vertex2 = i.vertices[(l + 1) % i.size];
-		
-		/* vertices are both outside */
-		if (vertex1.w < z && vertex2.w < z) continue;
-		
-		/* vertices are both inside */
-		const Vec3& barycenter1 = i.barycenters[l];
-		const Vec3& barycenter2 = i.barycenters[(l + 1) % i.size];
-		if (vertex1.w > z && vertex2.w > z) {
-			o.add_point(vertex2, barycenter2);
-			continue;
-		}
-		
-		/* traveling from inside to outside */
-		float weight1 = fabsf(vertex1.w - z);
-		float weight2 = fabsf(vertex2.w - z);
-		float inverse = 1 / (weight1 + weight2);
-		if (vertex1.w > z && vertex2.w < z) {
-			o.add_point((vertex1 * weight2 + vertex2 * weight1) * inverse,
-						(barycenter1 * weight2 + barycenter2 * weight1) * inverse);
-			continue;
-		}
-		
-		/* traveling from outside to inside */
-		o.add_point((vertex1 * weight2 + vertex2 * weight1) * inverse,
-					(barycenter1 * weight2 + barycenter2 * weight1) * inverse);
-		o.add_point(vertex2, barycenter2);
-	}
-}
-
-void zfar_clip(const PointList& i, float z, PointList& o) {
-	for (int l = 0; l < i.size; ++l) {
-		Vec4& vertex1 = i.vertices[l];
-		Vec4& vertex2 = i.vertices[(l + 1) % i.size];
-		
-		/* vertices are both outside */
-		if (vertex1.w > z && vertex2.w > z) continue;
-		
-		/* vertices are both inside */
-		const Vec3& barycenter1 = i.barycenters[l];
-		const Vec3& barycenter2 = i.barycenters[(l + 1) % i.size];
-		if (vertex1.w < z && vertex2.w < z) {
-			o.add_point(vertex2, barycenter2);
-			continue;
-		}
-		
-		/* traveling from inside to outside */
-		float weight1 = fabsf(vertex1.w - z);
-		float weight2 = fabsf(vertex2.w - z);
-		float inverse = 1 / (weight1 + weight2);
-		if (vertex1.w > z && vertex2.w < z) {
-			o.add_point((vertex1 * weight2 + vertex2 * weight1) * inverse,
-						(barycenter1 * weight2 + barycenter2 * weight1) * inverse);
-			continue;
-		}
-		
-		/* traveling from outside to inside */
-		o.add_point((vertex1 * weight2 + vertex2 * weight1) * inverse,
-					(barycenter1 * weight2 + barycenter2 * weight1) * inverse);
-		o.add_point(vertex2, barycenter2);
-	}
-}
-
-void rasterize(const PointList& p, const Vec3* d, Shader& s, double* zb, Vec4* canvas) {
-	for (int i = 2; i < p.size; ++i) {
-		const Vec3& vertex_a = d[0];
-		const Vec3& vertex_b = d[i - 1];
-		const Vec3& vertex_c = d[i];
-		Vec3 fixed_a = {p.barycenters[0].x, p.barycenters[0].y, p.barycenters[0].z};
-		Vec3 fixed_b = {p.barycenters[i - 1].x, p.barycenters[i - 1].y, p.barycenters[i - 1].z};
-		Vec3 fixed_c = {p.barycenters[i].x, p.barycenters[i].y, p.barycenters[i].z};
-		Vec3 fixed_barycenter = {1 / p.vertices[0].w, 1 / p.vertices[i - 1].w, 1 / p.vertices[i].w};
-		DVec2 v0 = {vertex_c.x - vertex_a.x, vertex_c.y - vertex_a.y};
-		DVec2 v1 = {vertex_b.x - vertex_a.x, vertex_b.y - vertex_a.y};
-		DVec2 v2 = {};
-		double dot00 = v0.dot(v0);
-		double dot01 = v0.dot(v1);
-		double dot11 = v1.dot(v1);
-		double inverse = 1 / (dot00 * dot11 - dot01 * dot01);
-		Vec3 barycenter;
-		Vec3 vertex_l = vertex_a;
-		Vec3 vertex_m = vertex_b;
-		Vec3 vertex_u = vertex_c;
-		if (vertex_l.y > vertex_m.y) std::swap(vertex_l, vertex_m);
-		if (vertex_m.y > vertex_u.y) std::swap(vertex_m, vertex_u);
-		if (vertex_l.y > vertex_m.y) std::swap(vertex_l, vertex_m);
-		float lower = fmaxf(floorf(vertex_l.y) + 1, 0);
-		float upper = fminf(floorf(vertex_u.y) + 1, viewport_h);
-		float median = vertex_m.y;
-		float inverse_ml = 1 / (vertex_m.y - vertex_l.y);
-		float inverse_um = 1 / (vertex_u.y - vertex_m.y);
-		float inverse_ul = 1 / (vertex_u.y - vertex_l.y);
-		for (float y = lower; y < upper; ++y) {
-			float left = y < median ?
-				(vertex_l.x * (vertex_m.y - y) + vertex_m.x * (y - vertex_l.y)) * inverse_ml :
-				(vertex_m.x * (vertex_u.y - y) + vertex_u.x * (y - vertex_m.y)) * inverse_um;
-			float right = (vertex_l.x * (vertex_u.y - y) + vertex_u.x * (y - vertex_l.y)) * inverse_ul;
-			if (left > right) std::swap(left, right);
-			left = fmaxf(floorf(left) + 1, 0);
-			right = fminf(floorf(right) + 1, viewport_w);
-			for (float x = left; x < right; ++x) {
-				v2.x = x - vertex_a.x;
-				v2.y = y - vertex_a.y;
-				double dot02 = v0.dot(v2);
-				double dot12 = v1.dot(v2);
-				double u = (dot11 * dot02 - dot01 * dot12) * inverse;
-				double v = (dot00 * dot12 - dot01 * dot02) * inverse;
-				if (UNLIKELY(u < -EPS || v < -EPS || u + v > 1 + EPS)) continue;
-				double z = vertex_a.z * (1 - u - v) + vertex_b.z * v + vertex_c.z * u;
-				int location = x + y * viewport_w;
-				if (z > -1 && z < 1 && z < zb[location] + EPS) {
-					zb[location] = z;
-					barycenter.x = (1 - u - v) * fixed_barycenter.x;
-					barycenter.y = v * fixed_barycenter.y;
-					barycenter.z = u * fixed_barycenter.z;
-					barycenter /= barycenter.x + barycenter.y + barycenter.z;
-					barycenter = fixed_a * barycenter.x + fixed_b * barycenter.y + fixed_c * barycenter.z;
-					s.fragment(barycenter, {x / viewport_w, y / viewport_h}, canvas[location]);
-				}
-			}
-		}
-	}
-}
-
-void rasterize(const PointList& p, const Vec3* d, double* zb) {
-	for (int i = 2; i < p.size; ++i) {
-		const Vec3& vertex_a = d[0];
-		const Vec3& vertex_b = d[i - 1];
-		const Vec3& vertex_c = d[i];
-		DVec2 v0 = {vertex_c.x - vertex_a.x, vertex_c.y - vertex_a.y};
-		DVec2 v1 = {vertex_b.x - vertex_a.x, vertex_b.y - vertex_a.y};
-		DVec2 v2 = {};
-		double dot00 = v0.dot(v0);
-		double dot01 = v0.dot(v1);
-		double dot11 = v1.dot(v1);
-		double inverse = 1 / (dot00 * dot11 - dot01 * dot01);
-		Vec3 vertex_l = vertex_a;
-		Vec3 vertex_m = vertex_b;
-		Vec3 vertex_u = vertex_c;
-		if (vertex_l.y > vertex_m.y) std::swap(vertex_l, vertex_m);
-		if (vertex_m.y > vertex_u.y) std::swap(vertex_m, vertex_u);
-		if (vertex_l.y > vertex_m.y) std::swap(vertex_l, vertex_m);
-		float lower = fmaxf(floorf(vertex_l.y) + 1, 0);
-		float upper = fminf(floorf(vertex_u.y) + 1, viewport_h);
-		float median = vertex_m.y;
-		float inverse_ml = 1 / (vertex_m.y - vertex_l.y);
-		float inverse_um = 1 / (vertex_u.y - vertex_m.y);
-		float inverse_ul = 1 / (vertex_u.y - vertex_l.y);
-		for (float y = lower; y < upper; ++y) {
-			float left = y < median ?
-				(vertex_l.x * (vertex_m.y - y) + vertex_m.x * (y - vertex_l.y)) * inverse_ml :
-				(vertex_m.x * (vertex_u.y - y) + vertex_u.x * (y - vertex_m.y)) * inverse_um;
-			float right = (vertex_l.x * (vertex_u.y - y) + vertex_u.x * (y - vertex_l.y)) * inverse_ul;
-			if (left > right) std::swap(left, right);
-			left = fmaxf(floorf(left) + 1, 0);
-			right = fminf(floorf(right) + 1, viewport_w);
-			for (float x = left; x < right; ++x) {
-				v2.x = x - vertex_a.x;
-				v2.y = y - vertex_a.y;
-				double dot02 = v0.dot(v2);
-				double dot12 = v1.dot(v2);
-				double u = (dot11 * dot02 - dot01 * dot12) * inverse;
-				double v = (dot00 * dot12 - dot01 * dot02) * inverse;
-				if (UNLIKELY(u < -EPS || v < -EPS || u + v > 1 + EPS)) continue;
-				double z = vertex_a.z * (1 - u - v) + vertex_b.z * v + vertex_c.z * u;
-				int location = x + y * viewport_w;
-				if (z > -1 && z < 1 && z < zb[location] + EPS) zb[location] = z;
-			}
-		}
-	}
-}
-
-void render(const Mesh& m, const Camera& c, Shader& s, double* zb, Vec4* canvas) {
-	Vec3 barycenters[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-	size_t length = m.vertex.size();
-	for (int i = 0; i < length; i += 3) {
-		/* vertex shader & geometry shader */
-		Vec4 vertices[3];
-		for (int j = 0; j < 3; ++j) {
-			s.vextex(m, i + j, j, vertices[j]);
-		}
-		s.geometry(vertices);
-		
-		/* do Z-near clipping */
-		Vec4 clip_vertices[4];
-		Vec3 clip_barycenters[4];
-		PointList clip_primitive = {0, clip_vertices, clip_barycenters};
-		znear_clip({3, vertices, barycenters}, c.near, clip_primitive);
-		
-		/* do Z-far clipping */
-		Vec4 primitive_vertices[5];
-		Vec3 primitive_barycenters[5];
-		PointList primitive = {0, primitive_vertices, primitive_barycenters};
-		zfar_clip(clip_primitive, c.far, primitive);
-		
-		/* perspective division */
-		Vec3 device_vertices[5];
-		for (int i = 0; i < primitive.size; ++i) {
-			device_vertices[i] = Vec3(
-				primitive.vertices[i].x,
-				primitive.vertices[i].y,
-				primitive.vertices[i].z
-			) / primitive.vertices[i].w;
-		}
-		
-		/* viewport transform */
-		int half_w = viewport_w / 2;
-		int half_h = viewport_h / 2;
-		for (int i = 0; i < primitive.size; ++i) {
-			device_vertices[i].x = device_vertices[i].x * half_w + half_w;
-			device_vertices[i].y = -device_vertices[i].y * half_h + half_h;
-		}
-		
-		/* rasterization */
-		if (canvas == nullptr) {
-			return rasterize(primitive, device_vertices, zb);
-		}
-		rasterize(primitive, device_vertices, s, zb, canvas);
-	}
-}
-
-void render_instance(const Instance* i, const Camera& c, Shader& s, double* zb, Vec4* canvas) {
-	s.model = i->matrix_global;
-	s.view = c.viewing;
-	s.proj = c.projection;
-	s.model_view = s.view * s.model;
-	s.model_view_proj = s.proj * s.model_view;
-	s.camera_pos = c.position;
-	render(*i->mesh, c, s, zb, canvas);
-}
-
-}
-
-/* -------------------------------------------------------------------------- */
 /* ---- ink/graphics/Gpu.cxx ------------------------------------------------ */
 /* -------------------------------------------------------------------------- */
-
-#include "libs/opengl/glad.h"
 
 namespace Ink::Gpu {
 
@@ -6091,11 +5921,26 @@ constexpr uint32_t GL_IMAGE_TYPES[] = {
 	GL_UNSIGNED_INT_24_8,                                     /**< IMAGE_UINT_24_8 */
 };
 
+constexpr uint32_t GL_IMAGE_COLORS[] = {
+	GL_RED,                                                   /**< channel is 1 */
+	GL_RG,                                                    /**< channel is 2 */
+	GL_RGB,                                                   /**< channel is 3 */
+	GL_RGBA,                                                  /**< channel is 4 */
+};
+
+constexpr uint32_t GL_IMAGE_COLOR_INTEGERS[] = {
+	GL_RED_INTEGER,                                           /**< channel is 1 */
+	GL_RG_INTEGER,                                            /**< channel is 2 */
+	GL_RGB_INTEGER,                                           /**< channel is 3 */
+	GL_RGBA_INTEGER,                                          /**< channel is 4 */
+};
+
 constexpr uint32_t GL_IMAGE_FORMATS[] = {
-	GL_RED,                                                   /**< Image::channel is 1 */
-	GL_RG,                                                    /**< Image::channel is 2 */
-	GL_RGB,                                                   /**< Image::channel is 3 */
-	GL_RGBA,                                                  /**< Image::channel is 4 */
+	GL_RGBA,                                                  /**< IMAGE_COLOR */
+	GL_RGBA_INTEGER,                                          /**< IMAGE_COLOR_INTEGER */
+	GL_DEPTH_COMPONENT,                                       /**< IMAGE_DEPTH */
+	GL_STENCIL_INDEX,                                         /**< IMAGE_STENCIL */
+	GL_DEPTH_STENCIL,                                         /**< IMAGE_DEPTH_STENCIL */
 };
 
 constexpr uint32_t GL_TEXTURE_TYPES[] = {
@@ -6194,45 +6039,38 @@ constexpr int32_t GL_TEXTURE_FILTERS[] = {
 };
 
 constexpr uint32_t GL_COLOR_ATTACHMENTS[] = {
-	GL_COLOR_ATTACHMENT0,                                     /**< render number is 1 */
-	GL_COLOR_ATTACHMENT1,                                     /**< render number is 2 */
-	GL_COLOR_ATTACHMENT2,                                     /**< render number is 3 */
-	GL_COLOR_ATTACHMENT3,                                     /**< render number is 4 */
-	GL_COLOR_ATTACHMENT4,                                     /**< render number is 5 */
-	GL_COLOR_ATTACHMENT5,                                     /**< render number is 6 */
-	GL_COLOR_ATTACHMENT6,                                     /**< render number is 7 */
-	GL_COLOR_ATTACHMENT7,                                     /**< render number is 8 */
-	GL_COLOR_ATTACHMENT8,                                     /**< render number is 9 */
-	GL_COLOR_ATTACHMENT9,                                     /**< render number is 10 */
-	GL_COLOR_ATTACHMENT10,                                    /**< render number is 11 */
-	GL_COLOR_ATTACHMENT11,                                    /**< render number is 12 */
-	GL_COLOR_ATTACHMENT12,                                    /**< render number is 13 */
-	GL_COLOR_ATTACHMENT13,                                    /**< render number is 14 */
-	GL_COLOR_ATTACHMENT14,                                    /**< render number is 15 */
-	GL_COLOR_ATTACHMENT15,                                    /**< render number is 16 */
-	GL_COLOR_ATTACHMENT16,                                    /**< render number is 17 */
-	GL_COLOR_ATTACHMENT17,                                    /**< render number is 18 */
-	GL_COLOR_ATTACHMENT18,                                    /**< render number is 19 */
-	GL_COLOR_ATTACHMENT19,                                    /**< render number is 20 */
-	GL_COLOR_ATTACHMENT20,                                    /**< render number is 21 */
-	GL_COLOR_ATTACHMENT21,                                    /**< render number is 22 */
-	GL_COLOR_ATTACHMENT22,                                    /**< render number is 23 */
-	GL_COLOR_ATTACHMENT23,                                    /**< render number is 24 */
-	GL_COLOR_ATTACHMENT24,                                    /**< render number is 25 */
-	GL_COLOR_ATTACHMENT25,                                    /**< render number is 26 */
-	GL_COLOR_ATTACHMENT26,                                    /**< render number is 27 */
-	GL_COLOR_ATTACHMENT27,                                    /**< render number is 28 */
-	GL_COLOR_ATTACHMENT28,                                    /**< render number is 29 */
-	GL_COLOR_ATTACHMENT29,                                    /**< render number is 30 */
-	GL_COLOR_ATTACHMENT30,                                    /**< render number is 31 */
-	GL_COLOR_ATTACHMENT31,                                    /**< render number is 32 */
-};
-
-constexpr TextureFormat TEXTURE_DEFAULT_FORMATS[][2] = {
-	{TEXTURE_R8_UNORM      , TEXTURE_R16_SFLOAT         },
-	{TEXTURE_R8G8_UNORM    , TEXTURE_R16G16_SFLOAT      },
-	{TEXTURE_R8G8B8_UNORM  , TEXTURE_R16G16B16_SFLOAT   },
-	{TEXTURE_R8G8B8A8_UNORM, TEXTURE_R16G16B16A16_SFLOAT},
+	GL_COLOR_ATTACHMENT0,                                     /**< target number is 1 */
+	GL_COLOR_ATTACHMENT1,                                     /**< target number is 2 */
+	GL_COLOR_ATTACHMENT2,                                     /**< target number is 3 */
+	GL_COLOR_ATTACHMENT3,                                     /**< target number is 4 */
+	GL_COLOR_ATTACHMENT4,                                     /**< target number is 5 */
+	GL_COLOR_ATTACHMENT5,                                     /**< target number is 6 */
+	GL_COLOR_ATTACHMENT6,                                     /**< target number is 7 */
+	GL_COLOR_ATTACHMENT7,                                     /**< target number is 8 */
+	GL_COLOR_ATTACHMENT8,                                     /**< target number is 9 */
+	GL_COLOR_ATTACHMENT9,                                     /**< target number is 10 */
+	GL_COLOR_ATTACHMENT10,                                    /**< target number is 11 */
+	GL_COLOR_ATTACHMENT11,                                    /**< target number is 12 */
+	GL_COLOR_ATTACHMENT12,                                    /**< target number is 13 */
+	GL_COLOR_ATTACHMENT13,                                    /**< target number is 14 */
+	GL_COLOR_ATTACHMENT14,                                    /**< target number is 15 */
+	GL_COLOR_ATTACHMENT15,                                    /**< target number is 16 */
+	GL_COLOR_ATTACHMENT16,                                    /**< target number is 17 */
+	GL_COLOR_ATTACHMENT17,                                    /**< target number is 18 */
+	GL_COLOR_ATTACHMENT18,                                    /**< target number is 19 */
+	GL_COLOR_ATTACHMENT19,                                    /**< target number is 20 */
+	GL_COLOR_ATTACHMENT20,                                    /**< target number is 21 */
+	GL_COLOR_ATTACHMENT21,                                    /**< target number is 22 */
+	GL_COLOR_ATTACHMENT22,                                    /**< target number is 23 */
+	GL_COLOR_ATTACHMENT23,                                    /**< target number is 24 */
+	GL_COLOR_ATTACHMENT24,                                    /**< target number is 25 */
+	GL_COLOR_ATTACHMENT25,                                    /**< target number is 26 */
+	GL_COLOR_ATTACHMENT26,                                    /**< target number is 27 */
+	GL_COLOR_ATTACHMENT27,                                    /**< target number is 28 */
+	GL_COLOR_ATTACHMENT28,                                    /**< target number is 29 */
+	GL_COLOR_ATTACHMENT29,                                    /**< target number is 30 */
+	GL_COLOR_ATTACHMENT30,                                    /**< target number is 31 */
+	GL_COLOR_ATTACHMENT31,                                    /**< target number is 32 */
 };
 
 ComparisonFunc get_comparison_function(uint32_t v) {
@@ -6315,9 +6153,8 @@ void State::flush() {
 std::string State::get_error() {
 	std::string info;
 	uint32_t error = glGetError();
-	if (error == GL_NO_ERROR) return "";
 	while (error != GL_NO_ERROR) {
-		info += "OpenGL: " + std::to_string(error) + ": ";
+		info += "OpenGL Error: " + std::to_string(error) + ": ";
 		if (error == GL_INVALID_ENUM) {
 			info += "An unacceptable value is specified for an enumerated argument.\n";
 		} else if (error == GL_INVALID_VALUE) {
@@ -6799,7 +6636,7 @@ void Shader::set_uniforms(const Uniforms& u) const {
 	auto* data_f = u.get_data();
 	auto* data_i = reinterpret_cast<const int*>(data_f);
 	auto* data_u = reinterpret_cast<const unsigned int*>(data_f);
-	size_t uniform_count = u.count();
+	size_t uniform_count = u.get_count();
 	for (int i = 0; i < uniform_count; ++i) {
 		std::string name = u.get_name(i);
 		int32_t gl_location = glGetUniformLocation(program, name.c_str());
@@ -6824,7 +6661,7 @@ void Shader::set_uniforms(const Uniforms& u) const {
 		} else if (type == 8 /* Mat4 */ ) {
 			glUniformMatrix4fv(gl_location, 1, GL_TRUE, data_f + location);
 		} else {
-			Error::set("Shader: Unknown uniform variable type");
+			Error::set("Shader", "Unknown uniform variable type");
 		}
 	}
 }
@@ -6843,7 +6680,7 @@ uint32_t Shader::compile_shader(const std::string& s, int32_t t) const {
 	glCompileShader(shader_id);
 	std::string info = get_compile_info(shader_id, t);
 	if (!info.empty()) {
-		Error::set(get_error_info(info, shader_string));
+		Error::set("Shader", get_error_info(info, shader_string));
 	}
 	glAttachShader(program, shader_id);
 	return shader_id;
@@ -6856,7 +6693,7 @@ void Shader::compile_shaders() const {
 	if (use_vert_shader) {
 		vert_id = compile_shader(vert_shader, GL_VERTEX_SHADER);
 	} else {
-		return Error::set("Shader: Vertex shader is missing");
+		return Error::set("Shader", "Vertex shader is missing");
 	}
 	
 	/* compile geometry shader */
@@ -6872,7 +6709,7 @@ void Shader::compile_shaders() const {
 	if (use_frag_shader) {
 		frag_id = compile_shader(frag_shader, GL_FRAGMENT_SHADER);
 	} else {
-		return Error::set("Shader: Fragment shader is missing");
+		return Error::set("Shader", "Fragment shader is missing");
 	}
 	
 	/* link shaders to program */
@@ -6997,7 +6834,7 @@ void VertexObject::load(const Mesh& m, const MeshGroup& g) {
 	
 	/* calculate length and stride */
 	length = g.length;
-	int group_end = g.position + length;
+	int group_end = g.position + g.length;
 	int stride = 3;
 	if (has_normal) stride += 3;
 	if (has_uv) stride += 2;
@@ -7120,10 +6957,12 @@ void Texture::init_2d(int w, int h, TextureFormat f, ImageType t) {
 	set_parameters(TEXTURE_2D, f);
 }
 
-void Texture::init_2d(const Image& i, TextureFormat f) {
+void Texture::init_2d(const Image& i, TextureFormat f, ImageFormat t) {
 	int32_t internal = GL_TEXTURE_FORMATS[f].first;
-	uint32_t external = GL_IMAGE_FORMATS[i.channel - 1];
+	uint32_t external = GL_IMAGE_FORMATS[t];
 	uint32_t data = GL_IMAGE_TYPES[i.bytes == 1 ? IMAGE_UBYTE : IMAGE_FLOAT];
+	if (external == GL_RGBA) external = GL_IMAGE_COLORS[i.channel - 1];
+	if (external == GL_RGBA_INTEGER) external = GL_IMAGE_COLOR_INTEGERS[i.channel - 1];
 	glBindTexture(GL_TEXTURE_2D, id);
 	glTexImage2D(GL_TEXTURE_2D, 0, internal, i.width, i.height, 0, external, data, i.data.data());
 	set_dimensions(i.width, i.height, 0);
@@ -7153,11 +6992,13 @@ void Texture::init_cube(int w, int h, TextureFormat f, ImageType t) {
 	set_parameters(TEXTURE_CUBE, f);
 }
 
-void Texture::init_cube(const Image& px, const Image& nx, const Image& py,
-						const Image& ny, const Image& pz, const Image& nz, TextureFormat f) {
+void Texture::init_cube(const Image& px, const Image& nx, const Image& py, const Image& ny,
+						const Image& pz, const Image& nz, TextureFormat f, ImageFormat t) {
 	int32_t internal = GL_TEXTURE_FORMATS[f].first;
-	uint32_t external = GL_IMAGE_FORMATS[px.channel - 1];
+	uint32_t external = GL_IMAGE_FORMATS[t];
 	uint32_t data = GL_IMAGE_TYPES[px.bytes == 1 ? IMAGE_UBYTE : IMAGE_FLOAT];
+	if (external == GL_RGBA) external = GL_IMAGE_COLORS[px.channel - 1];
+	if (external == GL_RGBA_INTEGER) external = GL_IMAGE_COLOR_INTEGERS[px.channel - 1];
 	glBindTexture(GL_TEXTURE_CUBE_MAP, id);
 	uint32_t target = GL_TEXTURE_CUBE_MAP_POSITIVE_X;
 	glTexImage2D(target, 0, internal, px.width, px.height, 0, external, data, px.data.data());
@@ -7233,17 +7074,17 @@ int Texture::get_layer() const {
 }
 
 TextureType Texture::get_type() const {
-	return id == 0 ? static_cast<TextureType>(-1) : type;
+	return type;
 }
 
 TextureFormat Texture::get_format() const {
-	return id == 0 ? static_cast<TextureFormat>(-1) : format;
+	return format;
 }
 
 void Texture::copy_to_image(Image& i) const {
 	/* check whether the texture is 2D */
 	if (type != TEXTURE_2D) {
-		return Error::set("Texture: Cannot get image from non-2D texture");
+		return Error::set("Texture", "Cannot get image from non-2D texture");
 	}
 	
 	/* get the external format of texture */
@@ -7330,12 +7171,19 @@ void Texture::set_parameters(TextureType t, TextureFormat f) {
 	format = f;
 }
 
-TextureFormat Texture::default_format(const Image& i) {
-	return TEXTURE_DEFAULT_FORMATS[i.channel - 1][i.bytes == 4];
+TextureFormat Texture::default_format(int c, int b) {
+	if (c == 1 && b == 1) return TEXTURE_R8_UNORM;
+	if (c == 1 && b == 4) return TEXTURE_R16_SFLOAT;
+	if (c == 2 && b == 1) return TEXTURE_R8G8_UNORM;
+	if (c == 2 && b == 4) return TEXTURE_R16G16_SFLOAT;
+	if (c == 3 && b == 1) return TEXTURE_R8G8B8_UNORM;
+	if (c == 3 && b == 4) return TEXTURE_R16G16B16A16_SFLOAT;
+	if (c == 4 && b == 1) return TEXTURE_R8G8B8A8_UNORM;
+	/* c == 4 && b == 4 */ return TEXTURE_R16G16B16A16_SFLOAT;
 }
 
-TextureFormat Texture::default_format(int c, int b) {
-	return TEXTURE_DEFAULT_FORMATS[c - 1][b == 4];
+TextureFormat Texture::default_format(const Image& i) {
+	return default_format(i.channel, i.bytes);
 }
 
 RenderBuffer::RenderBuffer() {
@@ -7397,7 +7245,7 @@ void RenderTarget::set_target_number(int n) const {
 void RenderTarget::activate() const {
 	glBindFramebuffer(GL_FRAMEBUFFER, id);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-		Error::set("RenderTarget: Render target is not complete");
+		Error::set("RenderTarget", "Render target is not complete");
 	}
 }
 
@@ -7405,7 +7253,7 @@ void RenderTarget::activate(const RenderTarget* f) {
 	uint32_t id = f == nullptr ? 0 : f->id;
 	glBindFramebuffer(GL_FRAMEBUFFER, id);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-		Error::set("RenderTarget: Render target is not complete");
+		Error::set("RenderTarget", "Render target is not complete");
 	}
 }
 
@@ -7422,7 +7270,7 @@ void RenderTarget::set_framebuffer(const Texture& t, uint32_t a, int l, int p) c
 	} else if (t.type == TEXTURE_CUBE_ARRAY) {
 		glFramebufferTextureLayer(GL_FRAMEBUFFER, a, t.id, l, p);
 	} else {
-		Error::set("RenderTarget: Texture type is not supported");
+		Error::set("RenderTarget", "Texture type is not supported");
 	}
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
@@ -7513,7 +7361,7 @@ const Gpu::Shader* ShaderCache::fetch(const std::string& n) {
 	if (vert_shaders.count(n) != 0) {
 		shader->load_vert(vert_shaders[n]);
 	} else {
-		Error::set("ShaderCache: Vertex shader is missing");
+		Error::set("ShaderCache", "Vertex shader is missing");
 	}
 	if (geom_shaders.count(n) != 0) {
 		shader->load_geom(geom_shaders[n]);
@@ -7521,7 +7369,7 @@ const Gpu::Shader* ShaderCache::fetch(const std::string& n) {
 	if (frag_shaders.count(n) != 0) {
 		shader->load_frag(frag_shaders[n]);
 	} else {
-		Error::set("ShaderCache: Fragment shader is missing");
+		Error::set("ShaderCache", "Fragment shader is missing");
 	}
 	
 	/* compile shader */
@@ -7545,7 +7393,7 @@ const Gpu::Shader* ShaderCache::fetch(const std::string& n, const Defines& d) {
 	if (vert_shaders.count(n) != 0) {
 		shader->load_vert(vert_shaders[n]);
 	} else {
-		Error::set("ShaderCache: Vertex shader is missing");
+		Error::set("ShaderCache", "Vertex shader is missing");
 	}
 	if (geom_shaders.count(n) != 0) {
 		shader->load_geom(geom_shaders[n]);
@@ -7553,7 +7401,7 @@ const Gpu::Shader* ShaderCache::fetch(const std::string& n, const Defines& d) {
 	if (frag_shaders.count(n) != 0) {
 		shader->load_frag(frag_shaders[n]);
 	} else {
-		Error::set("ShaderCache: Fragment shader is missing");
+		Error::set("ShaderCache", "Fragment shader is missing");
 	}
 	
 	/* set defines and compile shader */
@@ -7614,7 +7462,7 @@ void ShaderCache::resolve_includes(std::string& s) {
 		}
 		size_t char_4 = line.find('>', char_3 + 1);
 		if (char_4 == -1) {
-			Error::set("ShaderCache: Invalid preprocessing directive");
+			Error::set("ShaderCache", "Invalid preprocessing directive");
 			continue;
 		}
 		std::string include = line.substr(char_3 + 1, char_4 - char_3 - 1);
@@ -7628,7 +7476,7 @@ void ShaderCache::resolve_includes(std::string& s) {
 		
 		/* check if there is circular include dependency */
 		if (include_times++ == max_include_times) {
-			return Error::set("ShaderCache: Circular include dependency");
+			return Error::set("ShaderCache", "Circular include dependency");
 		}
 	}
 }
@@ -7931,7 +7779,7 @@ void IBLFilter::load_texture(const Gpu::Texture& t, Gpu::Texture& m, int s) {
 			blur_shader->set_uniform_v3("pole_axis", pole_axis);
 			blur_shader->set_uniform_i("map", m.activate(0));
 			for (int w = 0; w < 20; ++w) {
-				std::string weights_i = Format::format("weights[{}]", w);
+				std::string weights_i = fmt::format("weights[{}]", w);
 				blur_shader->set_uniform_f(weights_i, weights[w]);
 			}
 			fullscreen_plane->attach(*blur_shader);
@@ -7959,7 +7807,7 @@ void IBLFilter::load_texture(const Gpu::Texture& t, Gpu::Texture& m, int s) {
 			blur_shader->set_uniform_v3("pole_axis", pole_axis);
 			blur_shader->set_uniform_i("map", blur_map->activate(0));
 			for (int w = 0; w < 20; ++w) {
-				std::string weights_i = Format::format("weights[{}]", w);
+				std::string weights_i = fmt::format("weights[{}]", w);
 				blur_shader->set_uniform_f(weights_i, weights[w]);
 			}
 			fullscreen_plane->attach(*blur_shader);
@@ -8079,15 +7927,15 @@ Material* Scene::get_material(const std::string& n) const {
 }
 
 Material* Scene::get_material(const std::string& n, const Mesh& s) const {
-	auto name = Format::format("M{}#{}", reinterpret_cast<size_t>(&s), n);
+	auto name = fmt::format("M{}#{}", reinterpret_cast<size_t>(&s), n);
 	if (material_library.count(name) == 0) {
 		return nullptr;
 	}
 	return material_library.at(name);
 }
 
-Material* Scene::get_material(const std::string& n, const Instance* s) const {
-	auto name = Format::format("I{}#{}", reinterpret_cast<size_t>(s), n);
+Material* Scene::get_material(const std::string& n, const Instance& s) const {
+	auto name = fmt::format("I{}#{}", reinterpret_cast<size_t>(&s), n);
 	if (material_library.count(name) == 0) {
 		return nullptr;
 	}
@@ -8099,12 +7947,12 @@ void Scene::set_material(const std::string& n, Material* m) {
 }
 
 void Scene::set_material(const std::string& n, const Mesh& s, Material* m) {
-	auto name = Format::format("M{}#{}", reinterpret_cast<size_t>(&s), n);
+	auto name = fmt::format("M{}#{}", reinterpret_cast<size_t>(&s), n);
 	material_library.insert_or_assign(name, m);
 }
 
-void Scene::set_material(const std::string& n, const Instance* s, Material* m) {
-	auto name = Format::format("I{}#{}", reinterpret_cast<size_t>(s), n);
+void Scene::set_material(const std::string& n, const Instance& s, Material* m) {
+	auto name = fmt::format("I{}#{}", reinterpret_cast<size_t>(&s), n);
 	material_library.insert_or_assign(name, m);
 }
 
@@ -8113,12 +7961,12 @@ void Scene::remove_material(const std::string& n) {
 }
 
 void Scene::remove_material(const std::string& n, const Mesh& s) {
-	auto name = Format::format("M{}#{}", reinterpret_cast<size_t>(&s), n);
+	auto name = fmt::format("M{}#{}", reinterpret_cast<size_t>(&s), n);
 	material_library.erase(name);
 }
 
-void Scene::remove_material(const std::string& n, const Instance* s) {
-	auto name = Format::format("I{}#{}", reinterpret_cast<size_t>(s), n);
+void Scene::remove_material(const std::string& n, const Instance& s) {
+	auto name = fmt::format("I{}#{}", reinterpret_cast<size_t>(&s), n);
 	material_library.erase(name);
 }
 
@@ -8445,6 +8293,10 @@ void Renderer::unload_mesh(const Mesh& m) {
 	mesh_cache.erase(&m);
 }
 
+void Renderer::clear_mesh_caches() {
+	mesh_cache.clear();
+}
+
 void Renderer::load_image(const Image& i) {
 	if (image_cache.count(&i) != 0) return;
 	auto p = image_cache.insert({&i, std::make_unique<Gpu::Texture>()});
@@ -8459,6 +8311,10 @@ void Renderer::unload_image(const Image& i) {
 	image_cache.erase(&i);
 }
 
+void Renderer::clear_image_caches() {
+	image_cache.clear();
+}
+
 void Renderer::load_scene(const Scene& s) {
 	/* load the meshes linked with instance */
 	for (auto& instance : s.to_instances()) {
@@ -8468,10 +8324,6 @@ void Renderer::load_scene(const Scene& s) {
 	
 	/* load the images linked with instance */
 	for (auto& material : s.get_materials()) {
-		for (int i = 0; i < 16; ++i) {
-			auto* image = material->get_image(i);
-			if (image != nullptr) load_image(*image);
-		}
 		if (material->normal_map != nullptr) {
 			load_image(*material->normal_map);
 		}
@@ -8499,6 +8351,10 @@ void Renderer::load_scene(const Scene& s) {
 		if (material->specular_map != nullptr) {
 			load_image(*material->specular_map);
 		}
+		for (int i = 0; i < 16; ++i) {
+			auto* image = material->custom_maps[i];
+			if (image != nullptr) load_image(*image);
+		}
 	}
 }
 
@@ -8511,10 +8367,6 @@ void Renderer::unload_scene(const Scene& s) {
 	
 	/* unload the images linked with instance */
 	for (auto& material : s.get_materials()) {
-		for (int i = 0; i < 16; ++i) {
-			auto* image = material->get_image(i);
-			if (image != nullptr) unload_image(*image);
-		}
 		if (material->normal_map != nullptr) {
 			unload_image(*material->normal_map);
 		}
@@ -8541,6 +8393,10 @@ void Renderer::unload_scene(const Scene& s) {
 		}
 		if (material->specular_map != nullptr) {
 			unload_image(*material->specular_map);
+		}
+		for (int i = 0; i < 16; ++i) {
+			auto* image = material->custom_maps[i];
+			if (image != nullptr) unload_image(*image);
 		}
 	}
 }
@@ -8699,25 +8555,25 @@ void Renderer::update_scene(Scene& s) {
 
 void Renderer::set_material_defines(const Material& m, Defines& d) {
 	/* check whether to use vertex color */
-	d.set_if("USE_VERTEX_COLOR", m.vertex_color);
+	d.set_if("USE_VERTEX_COLOR", m.use_vertex_color);
 	
 	/* check whether to use normal map */
 	d.set_if("USE_NORMAL_MAP", m.normal_map != nullptr);
 	
 	/* check whether to use normal map in tangent space */
-	d.set_if("IN_TANGENT_SPACE", m.normal_map != nullptr && m.tangent_space);
+	d.set_if("USE_TANGENT_SPACE", m.normal_map != nullptr && m.use_tangent_space);
 	
 	/* check whether to use normal map in object space */
-	d.set_if("IN_OBJECT_SPACE", m.normal_map != nullptr && !m.tangent_space);
+	d.set_if("USE_OBJECT_SPACE", m.normal_map != nullptr && !m.use_tangent_space);
 	
 	/* check whether to use displacement map */
 	d.set_if("USE_DISPLACEMENT_MAP", m.displacement_map != nullptr);
 	
 	/* check whether to use color map */
-	d.set_if("USE_COLOR_MAP", m.color_map != nullptr && !m.map_with_alpha);
+	d.set_if("USE_COLOR_MAP", m.color_map != nullptr && !m.use_map_with_alpha);
 	
 	/* check whether to use color map with alpha channel */
-	d.set_if("USE_COLOR_ALPHA_MAP", m.color_map != nullptr && m.map_with_alpha);
+	d.set_if("USE_COLOR_ALPHA_MAP", m.color_map != nullptr && m.use_map_with_alpha);
 	
 	/* check whether to use alpha map */
 	d.set_if("USE_ALPHA_MAP", m.alpha_map != nullptr);
@@ -8800,7 +8656,7 @@ void Renderer::set_light_uniforms(const Scene& s, const Gpu::Shader& shader) {
 		
 		/* pass the light information to shader */
 		auto& light = *s.get_point_light(i);
-		auto lights_i = Format::format("point_lights[{}]", i);
+		auto lights_i = fmt::format("point_lights[{}]", i);
 		Vec3 light_color = light.color * light.intensity * PI;
 		shader.set_uniform_i(lights_i + ".visible", light.visible);
 		shader.set_uniform_v3(lights_i + ".position", light.position);
@@ -8815,7 +8671,7 @@ void Renderer::set_light_uniforms(const Scene& s, const Gpu::Shader& shader) {
 		
 		/* pass the light information to shader */
 		auto& light = *s.get_spot_light(i);
-		std::string lights_i = Format::format("spot_lights[{}]", i);
+		std::string lights_i = fmt::format("spot_lights[{}]", i);
 		Vec3 light_direction = -light.direction.normalize();
 		Vec3 light_color = light.color * light.intensity * PI;
 		float light_angle = cosf(light.angle);
@@ -8836,7 +8692,7 @@ void Renderer::set_light_uniforms(const Scene& s, const Gpu::Shader& shader) {
 		
 		/* pass the shadow information to shader */
 		auto& shadow = light.shadow;
-		std::string shadows_i = Format::format("spot_lights[{}].shadow", i);
+		std::string shadows_i = fmt::format("spot_lights[{}].shadow", i);
 		Mat4 view_proj = shadow.camera.projection * shadow.camera.viewing;
 		shader.set_uniform_i(shadows_i + ".type", shadow.type);
 		shader.set_uniform_i(shadows_i + ".map_id", shadow.map_id);
@@ -8852,7 +8708,7 @@ void Renderer::set_light_uniforms(const Scene& s, const Gpu::Shader& shader) {
 		
 		/* pass the light information to shader */
 		auto& light = *s.get_directional_light(i);
-		std::string lights_i = Format::format("directional_lights[{}]", i);
+		std::string lights_i = fmt::format("directional_lights[{}]", i);
 		Vec3 light_direction = -light.direction.normalize();
 		Vec3 light_color = light.color * light.intensity * PI;
 		shader.set_uniform_i(lights_i + ".visible", light.visible);
@@ -8866,7 +8722,7 @@ void Renderer::set_light_uniforms(const Scene& s, const Gpu::Shader& shader) {
 		
 		/* pass the shadow information to shader */
 		auto& shadow = light.shadow;
-		std::string shadows_i = Format::format("directional_lights[{}].shadow", i);
+		std::string shadows_i = fmt::format("directional_lights[{}].shadow", i);
 		Mat4 view_proj = shadow.camera.projection * shadow.camera.viewing;
 		shader.set_uniform_i(shadows_i + ".type", shadow.type);
 		shader.set_uniform_i(shadows_i + ".map_id", shadow.map_id);
@@ -8882,7 +8738,7 @@ void Renderer::set_light_uniforms(const Scene& s, const Gpu::Shader& shader) {
 		
 		/* pass the light information to shader */
 		auto& light = *s.get_hemisphere_light(i);
-		std::string lights_i = Format::format("hemisphere_lights[{}]", i);
+		std::string lights_i = fmt::format("hemisphere_lights[{}]", i);
 		Vec3 light_sky_color = light.color * light.intensity * PI;
 		Vec3 light_ground_color = light.ground_color * light.intensity * PI;
 		shader.set_uniform_i(lights_i + ".visible", light.visible);
@@ -8915,7 +8771,7 @@ void Renderer::set_light_uniforms(const Scene& s, const Gpu::Shader& shader) {
 	}
 }
 
-void Renderer::render_skybox_to_buffer(const Camera& c, int r) const {
+void Renderer::render_skybox_to_buffer(const Camera& c, RenderingMode r) const {
 	/* initialize cube vertex object */
 	[[maybe_unused]]
 	static bool inited = init_cube();
@@ -8968,7 +8824,7 @@ void Renderer::render_skybox_to_buffer(const Camera& c, int r) const {
 	cube->render();
 }
 
-void Renderer::render_to_buffer(const Scene& s, const Camera& c, int r, bool t) const {
+void Renderer::render_to_buffer(const Scene& s, const Camera& c, RenderingMode r, bool t) const {
 	/* create transform matrices & vectors */
 	Mat4 model;
 	Mat4 view = c.viewing;
@@ -9000,7 +8856,7 @@ void Renderer::render_to_buffer(const Scene& s, const Camera& c, int r, bool t) 
 		
 		/* check whether the scene is loaded */
 		if (mesh_cache.count(mesh) == 0) {
-			return Error::set("Renderer: Scene is not loaded");
+			return Error::set("Renderer", "Scene is not loaded");
 		}
 		
 		/* get vertex objects from mesh cache */
@@ -9010,7 +8866,7 @@ void Renderer::render_to_buffer(const Scene& s, const Camera& c, int r, bool t) 
 			
 			/* get material from material groups */
 			auto& group = mesh->groups[i];
-			auto* material = s.get_material(group.name, instance);
+			auto* material = s.get_material(group.name, *instance);
 			if (material == nullptr) {
 				material = s.get_material(group.name, *mesh);
 			}
@@ -9018,7 +8874,7 @@ void Renderer::render_to_buffer(const Scene& s, const Camera& c, int r, bool t) 
 				material = s.get_material(group.name);
 			}
 			if (material == nullptr) {
-				Error::set("Renderer: Material is not linked");
+				Error::set("Renderer", "Material is not linked");
 				continue;
 			}
 			
@@ -9096,7 +8952,7 @@ void Renderer::render_to_buffer(const Scene& s, const Camera& c, int r, bool t) 
 			
 			/* pass the images linked with material */
 			for (int j = 0; j < 16; ++j) {
-				auto* image = material->get_image(j);
+				auto* image = material->custom_maps[j];
 				if (image != nullptr) image_cache.at(image)->activate(j);
 			}
 			if (material->normal_map != nullptr) {
@@ -9205,7 +9061,7 @@ void Renderer::render_to_shadow(const Scene& s, const Camera& c) const {
 		
 		/* check whether the scene is loaded */
 		if (mesh_cache.count(mesh) == 0) {
-			Error::set("Renderer: Scene is not loaded");
+			Error::set("Renderer", "Scene is not loaded");
 			continue;
 		}
 		
@@ -9221,12 +9077,12 @@ void Renderer::render_to_shadow(const Scene& s, const Camera& c) const {
 				material = s.get_material(group.name);
 			}
 			if (material == nullptr) {
-				Error::set("Renderer: Material is not linked");
+				Error::set("Renderer", "Material is not linked");
 				continue;
 			}
 			
 			/* whether to use color map and alpha map */
-			bool use_color_map = material->color_map != nullptr && material->map_with_alpha;
+			bool use_color_map = material->color_map != nullptr && material->use_map_with_alpha;
 			bool use_alpha_map = material->alpha_map != nullptr;
 			
 			/* fetch the shadow shader from shader lib */
@@ -9408,7 +9264,7 @@ namespace Ink {
 
 void CopyPass::init() {}
 
-void CopyPass::render() const {
+void CopyPass::render() {
 	auto* copy_shader = ShaderLib::fetch("Copy");
 	copy_shader->use_program();
 	copy_shader->set_uniform_f("lod", 0);
@@ -9434,7 +9290,7 @@ namespace Ink {
 
 void BlendPass::init() {}
 
-void BlendPass::render() const {
+void BlendPass::render() {
 	Defines blend_defines;
 	blend_defines.set("BLEND_OP(a, b)", operation);
 	blend_defines.set("A_SWIZZLE", swizzle_a);
@@ -9507,7 +9363,7 @@ BlurPass::BlurPass(int w, int h) : width(w), height(h) {}
 void BlurPass::init() {
 	/* check the width and height */
 	if (width == 0 || height == 0) {
-		return Error::set("BlurPass: Width or height should be greater than 0");
+		return Error::set("BlurPass", "Width and height should be greater than 0");
 	}
 	
 	/* get default format with channel */
@@ -9534,7 +9390,7 @@ void BlurPass::init() {
 	blur_target_2->set_texture(*blur_map_2, 0);
 }
 
-void BlurPass::render() const {
+void BlurPass::render() {
 	/* fetch box / Gaussian / bilateral blur shader from shader lib */
 	Defines blur_defines;
 	blur_defines.set("TYPE", TYPES[channel - 1]);
@@ -9613,7 +9469,7 @@ namespace Ink {
 
 void LightPass::init() {}
 
-void LightPass::render() const {
+void LightPass::render() {
 	/* fetch light shader from shader lib */
 	Defines light_defines;
 	Renderer::set_tone_map_defines(tone_map_mode, light_defines);
@@ -9624,11 +9480,11 @@ void LightPass::render() const {
 	light_shader->use_program();
 	light_shader->set_uniform_v3("camera_pos", camera->position);
 	light_shader->set_uniform_f("exposure", tone_map_exposure);
-	light_shader->set_uniform_i("buffer_c", buffer_c->activate(0));
-	light_shader->set_uniform_i("buffer_n", buffer_n->activate(1));
-	light_shader->set_uniform_i("buffer_m", buffer_m->activate(2));
-	light_shader->set_uniform_i("buffer_a", buffer_a->activate(3));
-	light_shader->set_uniform_i("buffer_d", buffer_d->activate(4));
+	light_shader->set_uniform_i("g_color", g_color->activate(0));
+	light_shader->set_uniform_i("g_normal", g_normal->activate(1));
+	light_shader->set_uniform_i("g_material", g_material->activate(2));
+	light_shader->set_uniform_i("g_light", g_light->activate(3));
+	light_shader->set_uniform_i("z_map", z_map->activate(4));
 	
 	/* pass camera parameter to shader */
 	Mat4 inv_view_proj = inverse_4x4(camera->projection * camera->viewing);
@@ -9670,44 +9526,44 @@ void LightPass::set_tone_map(int m, float e) {
 	tone_map_exposure = e;
 }
 
-const Gpu::Texture* LightPass::get_buffer_c() const {
-	return buffer_c;
+const Gpu::Texture* LightPass::get_texture_color() const {
+	return g_color;
 }
 
-void LightPass::set_buffer_c(const Gpu::Texture* t) {
-	buffer_c = t;
+void LightPass::set_texture_color(const Gpu::Texture* t) {
+	g_color = t;
 }
 
-const Gpu::Texture* LightPass::get_buffer_n() const {
-	return buffer_n;
+const Gpu::Texture* LightPass::get_texture_normal() const {
+	return g_normal;
 }
 
-void LightPass::set_buffer_n(const Gpu::Texture* t) {
-	buffer_n = t;
+void LightPass::set_texture_normal(const Gpu::Texture* t) {
+	g_normal = t;
 }
 
-const Gpu::Texture* LightPass::get_buffer_m() const {
-	return buffer_m;
+const Gpu::Texture* LightPass::get_texture_material() const {
+	return g_material;
 }
 
-void LightPass::set_buffer_m(const Gpu::Texture* t) {
-	buffer_m = t;
+void LightPass::set_texture_material(const Gpu::Texture* t) {
+	g_material = t;
 }
 
-const Gpu::Texture* LightPass::get_buffer_a() const {
-	return buffer_a;
+const Gpu::Texture* LightPass::get_texture_light() const {
+	return g_light;
 }
 
-void LightPass::set_buffer_a(const Gpu::Texture* t) {
-	buffer_a = t;
+void LightPass::set_texture_light(const Gpu::Texture* t) {
+	g_light = t;
 }
 
-const Gpu::Texture* LightPass::get_buffer_d() const {
-	return buffer_d;
+const Gpu::Texture* LightPass::get_texture_depth() const {
+	return z_map;
 }
 
-void LightPass::set_buffer_d(const Gpu::Texture* t) {
-	buffer_d = t;
+void LightPass::set_texture_depth(const Gpu::Texture* t) {
+	z_map = t;
 }
 
 }
@@ -9724,7 +9580,7 @@ width(w), height(h), radius(r), max_radius(m), intensity(i) {}
 void SSAOPass::init() {
 	/* check the width and height */
 	if (width == 0 || height == 0) {
-		return Error::set("SSAOPass: Width or height should be greater than 0");
+		return Error::set("SSAOPass", "Width and height should be greater than 0");
 	}
 	
 	/* prepare blur map 1 */
@@ -9748,7 +9604,7 @@ void SSAOPass::init() {
 	blur_target_2->set_texture(*blur_map_2, 0);
 }
 
-void SSAOPass::render() const {
+void SSAOPass::render() {
 	/* fetch SSAO shader from shader lib */
 	Defines ssao_defines;
 	ssao_defines.set("SAMPLES", std::to_string(samples));
@@ -9780,14 +9636,14 @@ void SSAOPass::render() const {
 	ssao_shader->set_uniform_f("intensity", intensity);
 	ssao_shader->set_uniform_f("radius", radius);
 	ssao_shader->set_uniform_f("max_radius", max_radius);
-	ssao_shader->set_uniform_f("max_depth", max_depth);
+	ssao_shader->set_uniform_f("max_z", max_z);
 	ssao_shader->set_uniform_f("near", camera->near);
 	ssao_shader->set_uniform_f("far", camera->far);
 	ssao_shader->set_uniform_m4("view", camera->viewing);
 	ssao_shader->set_uniform_m4("proj", camera->projection);
 	ssao_shader->set_uniform_m4("inv_proj", inv_proj);
-	ssao_shader->set_uniform_i("buffer_n", buffer_n->activate(0));
-	ssao_shader->set_uniform_i("buffer_d", buffer_d->activate(1));
+	ssao_shader->set_uniform_i("g_normal", g_normal->activate(0));
+	ssao_shader->set_uniform_i("z_map", z_map->activate(1));
 	RenderPass::render_to(ssao_shader, blur_target_1.get());
 	
 	/* 2. blur texture for two times */
@@ -9840,20 +9696,20 @@ void SSAOPass::set_texture(const Gpu::Texture* t) {
 	map = t;
 }
 
-const Gpu::Texture* SSAOPass::get_buffer_n() const {
-	return buffer_n;
+const Gpu::Texture* SSAOPass::get_texture_normal() const {
+	return g_normal;
 }
 
-void SSAOPass::set_buffer_n(const Gpu::Texture* n) {
-	buffer_n = n;
+void SSAOPass::set_texture_normal(const Gpu::Texture* t) {
+	g_normal = t;
 }
 
-const Gpu::Texture* SSAOPass::get_buffer_d() const {
-	return buffer_d;
+const Gpu::Texture* SSAOPass::get_texture_depth() const {
+	return z_map;
 }
 
-void SSAOPass::set_buffer_d(const Gpu::Texture* d) {
-	buffer_d = d;
+void SSAOPass::set_texture_depth(const Gpu::Texture* t) {
+	z_map = t;
 }
 
 }
@@ -9869,7 +9725,7 @@ width(w), height(h), thickness(t), intensity(i) {}
 
 void SSRPass::init() {}
 
-void SSRPass::render() const {
+void SSRPass::render() {
 	/* fetch SSR shader from shader lib */
 	auto* ssr_shader = ShaderLib::fetch("SSR");
 	
@@ -9891,9 +9747,9 @@ void SSRPass::render() const {
 	ssr_shader->set_uniform_m4("proj", camera->projection);
 	ssr_shader->set_uniform_m4("inv_proj", inv_proj);
 	ssr_shader->set_uniform_i("map", map->activate(0));
-	ssr_shader->set_uniform_i("buffer_n", buffer_n->activate(1));
-	ssr_shader->set_uniform_i("buffer_m", buffer_m->activate(2));
-	ssr_shader->set_uniform_i("buffer_d", buffer_d->activate(3));
+	ssr_shader->set_uniform_i("g_normal", g_normal->activate(1));
+	ssr_shader->set_uniform_i("g_material", g_material->activate(2));
+	ssr_shader->set_uniform_i("z_map", z_map->activate(3));
 	RenderPass::render_to(ssr_shader, target);
 }
 
@@ -9913,28 +9769,28 @@ void SSRPass::set_texture(const Gpu::Texture* t) {
 	map = t;
 }
 
-const Gpu::Texture* SSRPass::get_buffer_n() const {
-	return buffer_n;
+const Gpu::Texture* SSRPass::get_texture_normal() const {
+	return g_normal;
 }
 
-void SSRPass::set_buffer_n(const Gpu::Texture* n) {
-	buffer_n = n;
+void SSRPass::set_texture_normal(const Gpu::Texture* n) {
+	g_normal = n;
 }
 
-const Gpu::Texture* SSRPass::get_buffer_m() const {
-	return buffer_m;
+const Gpu::Texture* SSRPass::get_texture_material() const {
+	return g_material;
 }
 
-void SSRPass::set_buffer_m(const Gpu::Texture* m) {
-	buffer_m = m;
+void SSRPass::set_texture_material(const Gpu::Texture* m) {
+	g_material = m;
 }
 
-const Gpu::Texture* SSRPass::get_buffer_d() const {
-	return buffer_d;
+const Gpu::Texture* SSRPass::get_texture_depth() const {
+	return z_map;
 }
 
-void SSRPass::set_buffer_d(const Gpu::Texture* d) {
-	buffer_d = d;
+void SSRPass::set_texture_depth(const Gpu::Texture* t) {
+	z_map = t;
 }
 
 }
@@ -9951,7 +9807,7 @@ width(w), height(h), threshold(t), intensity(i), radius(r) {}
 void BloomPass::init() {
 	/* check the width and height */
 	if (width == 0 || height == 0) {
-		return Error::set("BloomPass: Width or height should be greater than 0");
+		return Error::set("BloomPass", "Width and height should be greater than 0");
 	}
 	
 	/* prepare bloom map 1 */
@@ -9972,7 +9828,7 @@ void BloomPass::init() {
 	bloom_target = std::make_unique<Gpu::RenderTarget>();
 }
 
-void BloomPass::render() const {
+void BloomPass::render() {
 	/* fetch bright pass shader from shader lib */
 	auto* bright_pass_shader = ShaderLib::fetch("BrightPass");
 	
@@ -10062,7 +9918,7 @@ namespace Ink {
 
 void FXAAPass::init() {}
 
-void FXAAPass::render() const {
+void FXAAPass::render() {
 	auto* fxaa_shader = ShaderLib::fetch("FXAA");
 	Gpu::Rect viewport = RenderPass::get_viewport();
 	Vec2 screen_size = Vec2(viewport.width, viewport.height);
@@ -10090,7 +9946,7 @@ namespace Ink {
 
 void GrainPass::init() {}
 
-void GrainPass::render() const {
+void GrainPass::render() {
 	auto* grain_shader = ShaderLib::fetch("Grain");
 	Gpu::Rect viewport = RenderPass::get_viewport();
 	Vec2 screen_size = Vec2(viewport.width, viewport.height);
@@ -10119,7 +9975,7 @@ namespace Ink {
 
 void ToneMapPass::init() {}
 
-void ToneMapPass::render() const {
+void ToneMapPass::render() {
 	Defines tone_map_defines;
 	Renderer::set_tone_map_defines(mode, tone_map_defines);
 	auto* tone_map_shader = ShaderLib::fetch("ToneMapping", tone_map_defines);
@@ -10147,7 +10003,7 @@ namespace Ink {
 
 void ColorGradePass::init() {}
 
-void ColorGradePass::render() const {
+void ColorGradePass::render() {
 	auto* color_grade_shader = ShaderLib::fetch("ColorGrading");
 	color_grade_shader->use_program();
 	color_grade_shader->set_uniform_v3("saturation", saturation);
@@ -10183,7 +10039,7 @@ Audio::Audio(const std::string& p) {
 	if (SDL_LoadWAV(p.c_str(), &spec, &buffer, &length) == nullptr) {
 		auto error = SDL_GetError();
 		printf("%s\n", error);
-		Error::set("Audio: Error reading from WAVE file");
+		Error::set("Audio", "Failed to read from WAVE file");
 	}
 	ratio = spec.channels * spec.freq * (spec.format >> 3 & 0x1F);
 	spec.userdata = this;
@@ -10258,8 +10114,6 @@ void Audio::set_position(float p) {
 /* ---- ink/window/Window.cxx ----------------------------------------------- */
 /* -------------------------------------------------------------------------- */
 
-#include "libs/opengl/glad.h"
-
 namespace Ink {
 
 void Window::init(const std::string& t, int x, int y, int w, int h, bool d) {
@@ -10289,7 +10143,7 @@ void Window::init_opengl(int v, int d, int s, int m, bool a) {
 	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, a);
 	context = SDL_GL_CreateContext(sdl_window);
 	SDL_GL_SetSwapInterval(v);
-	if (gladLoadGL() == 0) Error::set("Window: Failed to load OpenGL");
+	if (gladLoadGL() == 0) Error::set("Window", "Failed to load OpenGL");
 }
 
 void Window::close() {
@@ -10486,116 +10340,6 @@ bool Window::keyreleased[512];
 }
 
 /* -------------------------------------------------------------------------- */
-/* ---- ink/physics/Physics.cxx --------------------------------------------- */
-/* -------------------------------------------------------------------------- */
-
-namespace Ink {
-
-CollisionBox::CollisionBox(const Vec3& v1, const Vec3& v2) :
-v1(v1), v2(v2) {}
-
-void CollisionBox::set(const Vec3& v, float w, float h, float d) {
-	v1 = v;
-	v2.x = v.x + w;
-	v2.y = v.y + h;
-	v2.z = v.z + d;
-}
-
-bool CollisionBox::contain(const Vec3& v) const {
-	return v1.x < v.x && v.x < v2.x && v1.y < v.y &&
-		v.y < v2.y && v1.z < v.z && v.z < v2.z;
-}
-
-bool CollisionBox::contain(float x, float y, float z) const {
-	return v1.x < x && x < v2.x && v1.y < y &&
-		y < v2.y && v1.z < z && z < v2.z;
-}
-
-bool CollisionBox::hittest(const CollisionBox& b) const {
-	return contain(b.v1.x, b.v1.y, b.v1.z) ||
-		contain(b.v1.x, b.v1.y, b.v2.z) ||
-		contain(b.v1.x, b.v2.y, b.v1.z) ||
-		contain(b.v1.x, b.v2.y, b.v2.z) ||
-		contain(b.v2.x, b.v1.y, b.v1.z) ||
-		contain(b.v2.x, b.v1.y, b.v2.z) ||
-		contain(b.v2.x, b.v2.y, b.v1.z) ||
-		contain(b.v2.x, b.v2.y, b.v2.z) ||
-		b.contain(v1.x, v1.y, v1.z) ||
-		b.contain(v1.x, v1.y, v2.z) ||
-		b.contain(v1.x, v2.y, v1.z) ||
-		b.contain(v1.x, v2.y, v2.z) ||
-		b.contain(v2.x, v1.y, v1.z) ||
-		b.contain(v2.x, v1.y, v2.z) ||
-		b.contain(v2.x, v2.y, v1.z) ||
-		b.contain(v2.x, v2.y, v2.z);
-}
-
-Solid::Solid(const Vec3& p, float w, float h, float d) :
-	position(p), width(w), height(h), depth(d) {
-	refresh();
-}
-
-void Solid::activate() {
-	world.insert(this);
-}
-
-void Solid::deactivate() {
-	world.erase(this);
-}
-
-void Solid::refresh() {
-	box.set(position, width, height, depth);
-}
-
-void Solid::collide(Solid* s, float x, float y, float z) {
-	CollisionBox& collided = s->box;
-	if (s != this && box.hittest(collided)) {
-		if (x > 0) {
-			position.x = collided.v1.x - width - limit;
-		} else if (x < 0) {
-			position.x = collided.v2.x + limit;
-		}
-		if (y > 0) {
-			position.y = collided.v1.y - height - limit;
-		} else if (y < 0) {
-			position.y = collided.v2.y + limit;
-		}
-		if (z > 0) {
-			position.z = collided.v1.z - depth - limit;
-		} else if (z < 0) {
-			position.z = collided.v2.z + limit;
-		}
-		refresh();
-	}
-}
-
-void Solid::move(const Vec3& d) {
-	auto world_begin = world.begin();
-	auto world_end = world.end();
-	position.x += d.x;
-	refresh();
-	for (auto i = world_begin; i != world_end; ++i) {
-		collide(*i, d.x, 0, 0);
-	}
-	position.y += d.y;
-	refresh();
-	for (auto i = world_begin; i != world_end; ++i) {
-		collide(*i, 0, d.y, 0);
-	}
-	position.z += d.z;
-	refresh();
-	for (auto i = world_begin; i != world_end; ++i) {
-		collide(*i, 0, 0, d.z);
-	}
-}
-
-float Solid::limit = 1e-4;
-
-std::unordered_set<Solid*> Solid::world;
-
-}
-
-/* -------------------------------------------------------------------------- */
 /* ---- ink/utils/ConvexHull.cxx -------------------------------------------- */
 /* -------------------------------------------------------------------------- */
 
@@ -10603,10 +10347,6 @@ namespace Ink {
 
 void ConvexHull::add_vertex(const Vec3& v) {
 	vertices.emplace_back(v);
-}
-
-void ConvexHull::add_vertices(const std::initializer_list<Vec3>& v) {
-	vertices.insert(vertices.end(), v);
 }
 
 size_t ConvexHull::get_vertex_count() const {
@@ -10660,7 +10400,7 @@ void ConvexHull::compute() {
 }
 
 void ConvexHull::insert_face(int a, int b, int c) {
-	faces.emplace_back(std::array<int, 3>({a, b, c}));
+	faces.emplace_back(std::array<int, 3>{a, b, c});
 	normals.emplace_back((vertices[b] - vertices[a]).cross(vertices[c] - vertices[a]));
 }
 

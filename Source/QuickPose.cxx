@@ -26,6 +26,37 @@
 
 #include <iostream>
 
+#include <opencv2/opencv.hpp>
+
+//void Triangulate_With_Conf(const float* &pointsOnEachCamera, const cv::Mat** &cameraMatrices, size_t size,
+//						   cv::Mat &reconstructedPoint) {
+//	// cameraMatrices store the P matrix of each camera. Please see the top for its calculation
+//
+//	cv::Mat A = cv::Mat::zeros(static_cast<int>(size) * 2, 4, CV_32F);
+//
+//	// Normalize the weights
+//	// Note that z coordinate of each 2d point is its contribution weight for triangulation
+//	float totWeight = 0.0;
+//	for (int i = 0; i < size; ++i){
+//		assert(pointsOnEachCamera[i]->z >= 0);
+//		totWeight += pointsOnEachCamera[i]->z;
+//	}
+//	assert(totWeight > 0);
+//
+//	cv::Mat x = cameraMatrices[0]->row(0);
+//
+//	for (int i = 0; i < size; ++i) {
+//		A.row(i * 2) = (pointsOnEachCamera[i]->x * cameraMatrices[i]->row(2) - cameraMatrices[i]->row(0)) *
+//					   (pointsOnEachCamera[i]->z / totWeight); // confidence
+//		A.row(i * 2 + 1) = (pointsOnEachCamera[i]->y * cameraMatrices[i]->row(2) - cameraMatrices[i]->row(1)) *
+//						   (pointsOnEachCamera[i]->z / totWeight); // confidence
+//	}
+//	// Solve x for Ax = 0 --> SVD on A
+//	cv::SVD::solveZ(A, reconstructedPoint);
+//	reconstructedPoint /= reconstructedPoint.at<float>(3);
+//}
+
+
 constexpr float EPS = 0.0001f;
 constexpr int NO_CHOICE = -1;
 
@@ -53,6 +84,10 @@ void QuickPose::initBody25() {
 	parents = {
 		1, 8, 1, 2, 3, 1, 5, 6, -1, 8, 9, 10, 8, 12, 13, 0, 0, 15, 16, 14, 19, 14, 11, 22, 11,
 	};
+	/* New Parent */
+	parents = {
+		1, 8, 1, 2, 3, 1, 5, 6, -1, 8, 9, 10, 8, 12, 13, 0, 0, 2, 5, 14, 19, 14, 11, 22, 11,
+	};
 	historyScores.resize(25);
 }
 
@@ -61,6 +96,7 @@ MultiPersonPose QuickPose::compute(const MultiView& multiview) {
 	typeNum = static_cast<int>(multiview.views[0].joints.size());
 	
 	rays.resize(viewNum);
+	confs.resize(viewNum);
 	
 	clusterNum = 0;
 	preservedClusters.resize(maxClusterNum);
@@ -76,9 +112,14 @@ MultiPersonPose QuickPose::compute(const MultiView& multiview) {
 	};
 	
 	std::vector<std::vector<int> > jointOrders = {
-		{8, 1, 2, 3, 4, 5, 6, 7, 0},
+//		{8, 1, 2, 3, 4, 5, 6, 7, 0},
+		{8, 1, 2, 3, 4},
+		{8, 1, 5, 6, 7},
+		{8, 1, 0},
 		{8, 9, 10, 11},
 		{8, 12, 13, 14},
+		{8, 1, 2, 17},
+		{8, 1, 5, 18},
 	};
 	
 	for (auto& curViewOrder : viewOrders) {
@@ -90,67 +131,7 @@ MultiPersonPose QuickPose::compute(const MultiView& multiview) {
 		}
 	}
 	
-//	return MultiPersonPose();
 	return postProcessing(multiview);
-	
-//	MultiPersonPose multiPersonPose;
-//
-//	multiPersonPose.resize(multiview.views[mainView].joints[8].size());
-//
-//	for (auto& personPose : multiPersonPose) {
-//		personPose.hasJoint.resize(typeNum);
-//		personPose.jointPos.resize(typeNum);
-//	}
-//
-//	std::vector<std::vector<bool> > usedJoints;
-//	usedJoints.resize(typeNum);
-//
-//	for (auto& usedJointsPerType : usedJoints) {
-//		usedJointsPerType.resize(10); /**< Max person number */
-//	}
-//
-//	for (auto& order : jointOrders) {
-//		clusterNum = 0;
-//		jointOrder = order;
-//		compute(multiview, cluster, 0, 0);
-//
-//		std::fill(usedJoints[8].begin(), usedJoints[8].end(), false);
-//
-//		std::sort(clusters.data(), clusters.data() + clusterNum,
-//				  [](const QCluster& c1, const QCluster& c2) ->bool {
-//			return c1.score > c2.score;
-//		});
-//
-//		for (int clusterI = 0; clusterI < clusterNum; ++clusterI) {
-//			auto& cluster = clusters[clusterI];
-//			int personID = cluster.getJoint(mainView, 8);
-//			if (usedJoints[8][personID]) continue;
-//
-//			bool occlusion = false;
-//			for (int type = 0; type < typeNum; ++type) {
-//				int choice = cluster.getJoint(mainView, type);
-//				if (choice != NO_CHOICE && usedJoints[type][choice]) {
-//					occlusion = true;
-//					break;
-//				}
-//			}
-//
-//			if (!occlusion) {
-//				for (int type = 0; type < typeNum; ++type) {
-//					int choice = cluster.getJoint(mainView, type);
-//					if (choice != NO_CHOICE) usedJoints[type][choice] = true;
-//				}
-//				for (int type = 0; type < typeNum; ++type) {
-//					if (cluster.getJoint(mainView, type) != NO_CHOICE) {
-//						multiPersonPose[personID].hasJoint[type] = true;
-//						multiPersonPose[personID].jointPos[type] = cluster.worldPos[type];
-//					}
-//				}
-//			}
-//		}
-//	}
-//
-//	return multiPersonPose;
 }
 
 bool QuickPose::computeWorldPos(const MultiView& multiview, QCluster& cluster, int jointType) {
@@ -159,7 +140,10 @@ bool QuickPose::computeWorldPos(const MultiView& multiview, QCluster& cluster, i
 		int view = viewOrder[viewI];
 		int choice = cluster.getJoint(view, jointType);
 		if (choice == NO_CHOICE) continue;
-		rays[rayNum++] = &multiview.views[view].joints[jointType][choice].ray;
+		rays[rayNum] = &multiview.views[view].joints[jointType][choice].ray;
+		confs[rayNum] = multiview.views[view].joints[jointType][choice].conf;
+		confs[rayNum] *= confs[rayNum];
+		++rayNum;
 	}
 	
 	if (rayNum < 2) return false;
@@ -308,7 +292,7 @@ void QuickPose::compute(const MultiView& multiview, QCluster& cluster, int viewI
 		cluster.score = originalScore;
 		
 	} else if (viewI != 0) {
-		if (successfulShift) return; /* Wrong */
+//		if (successfulShift) return; /* Wrong */
 		
 		/* Shift to the next view */
 		compute(multiview, cluster, viewI + 1, jointI);
@@ -447,7 +431,10 @@ float QuickPose::getMaxBoneLength(int jointTypeA, int jointTypeB) const {
 	if (maxBoneLengths.count(jointTypeA + jointTypeB * I16) != 0) {
 		return maxBoneLengths.at(jointTypeA + jointTypeB * I16);
 	}
-	return maxBoneLengths.at(jointTypeA * I16 + jointTypeB);
+	if (maxBoneLengths.count(jointTypeA * I16 + jointTypeB) != 0) {
+		return maxBoneLengths.at(jointTypeA * I16 + jointTypeB);
+	}
+	return std::numeric_limits<float>::max();
 }
 
 void QuickPose::setMaxBoneLength(int jointTypeA, int jointTypeB, float length) {

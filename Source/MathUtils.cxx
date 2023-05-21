@@ -46,3 +46,21 @@ Ink::Vec3 MathUtils::multiRayIntersect(const Ink::Ray** rays, size_t size) {
 	}
 	return Ink::inverse_3x3(A) * b;
 }
+
+Ink::Vec3 MathUtils::multiRayIntersect(const Ink::Ray** rays, float* confs, size_t size) {
+	Ink::Mat3 A;
+	Ink::Vec3 b;
+	for (int i = 0; i < size; ++i) {
+		auto& dx = rays[i]->direction.x;
+		auto& dy = rays[i]->direction.y;
+		auto& dz = rays[i]->direction.z;
+		Ink::Mat3 N = {
+			dx * dx - 1.f, dx * dy, dx * dz,
+			dy * dx, dy * dy - 1.f, dy * dz,
+			dz * dx, dz * dy, dz * dz - 1.f,
+		};
+		A += N * confs[i];
+		b += N * rays[i]->origin * confs[i];
+	}
+	return Ink::inverse_3x3(A) * b;
+}

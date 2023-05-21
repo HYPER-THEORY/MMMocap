@@ -22,12 +22,13 @@
 
 #pragma once
 
-#include "External/Ink/Ink.h"
+#include "ink/Ink.h"
 
 struct Joint {
 	int ID = 0;
-	Ink::Vec2 uv;
 	Ink::Ray ray;
+	Ink::Vec2 uv;
+	float conf = 0;
 };
 
 class Camera {

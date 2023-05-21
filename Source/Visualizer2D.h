@@ -22,13 +22,10 @@
 
 #pragma once
 
-#include "ink/Ink.h"
+#include "Views.h"
 
-class MathUtils {
+class Visualizer2D {
 public:
-	static float computeRayDistance(const Ink::Ray& ray1, const Ink::Ray& ray2);
-	
-	static Ink::Vec3 multiRayIntersect(const Ink::Ray** rays, size_t size);
-	
-	static Ink::Vec3 multiRayIntersect(const Ink::Ray** rays, float* confs, size_t size);
+	static void visualize(const MultiPersonPose& multiPersonPose,
+						  const View& view, const std::string& imagePath);
 };

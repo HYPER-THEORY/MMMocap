@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "External/Ink/Ink.h"
+#include "External/ink/Ink.h"
 
 class Utils3D {
 public:
@@ -31,7 +31,7 @@ public:
 
 class OneRoom {
 public:
-	static Ink::Vec3 DEFAULT_COLOR;
+	static const Ink::Vec3 DEFAULT_COLOR;
 	
 	static void prepareResources();
 	
@@ -39,7 +39,7 @@ public:
 	
 	static void update(float deltaTime);
 	
-	static void render();
+	static void render(const Ink::Camera* camera = nullptr);
 	
 	static void setJoint(const Ink::Vec3& pos, const Ink::Vec3& color = DEFAULT_COLOR);
 	
@@ -49,7 +49,11 @@ public:
 	
 	static void setCamera(const Ink::Vec3& pos, const Ink::Vec3& dir);
 	
+	static void setRealtimeReflection(bool enable);
+	
 private:
+	static bool enableRealtimeReflection;
+	
 	static int jointNumber;
 	
 	static int boneNumber;
@@ -78,7 +82,7 @@ private:
 	
 	static std::unordered_map<std::string, Ink::ReflectionProbe> probes;
 	
-	static std::unordered_map<std::string, Ink::Instance*> instances;
+	static std::unordered_map<std::string, Ink::Instance> instances;
 	
 	static std::unordered_map<std::string, Ink::Gpu::Texture> maps;
 	

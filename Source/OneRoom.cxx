@@ -73,13 +73,13 @@ Ink::Euler Utils3D::makeEuler(const Ink::Vec3& from, const Ink::Vec3& to) {
 void OneRoom::prepareResources() {
 	probes["Ground"] = Ink::ReflectionProbe(1.5, 1024);
 	
-	meshes["Sphere"] = Ink::Loader::load_obj(PATH_S "Sphere.obj")[0];
+	meshes["Sphere"] = Ink::Loader::load_obj(PATH_S "Sphere.obj").meshes[0];
 	meshes["Sphere"].create_tangents();
 	
-	meshes["Cylinder"] = Ink::Loader::load_obj(PATH_S "Cylinder.obj")[0];
+	meshes["Cylinder"] = Ink::Loader::load_obj(PATH_S "Cylinder.obj").meshes[0];
 	meshes["Cylinder"].create_tangents();
 	
-	meshes["Gallery"] = Ink::Loader::load_obj(PATH_G "source/2.obj")[0];
+	meshes["Gallery"] = Ink::Loader::load_obj(PATH_G "source/2.obj").meshes[0];
 	meshes["Gallery"].create_tangents();
 	
 	images["WallL2"] = Ink::Loader::load_image(PATH_G "textures/wall_l2.png");
@@ -115,26 +115,31 @@ void OneRoom::prepareResources() {
 	materials["Material.006"].emissive = {1, 1, 1};
 	materials["Material.006"].emissive_map = &images["WallBack2"];
 	
-	materials["Material"] = Ink::Material();
-	materials["Material"].side = Ink::DOUBLE_SIDE;
-	materials["Material"].emissive = {1, 1, 1};
+	materials["Material.005"] = Ink::Material();
+	materials["Material.005"].side = Ink::DOUBLE_SIDE;
+	materials["Material.005"].emissive = {1, 1, 1};
 	
 	materials["Light.001"] = Ink::Material();
 	materials["Light.001"].side = Ink::DOUBLE_SIDE;
 	materials["Light.001"].emissive = {2, 2, 2};
 	
-	instances["Gallery"] = Ink::Instance::create();
-	instances["Gallery"]->mesh = &meshes["Gallery"];
-	instances["Gallery"]->scale = {0.2, 0.2, 0.2};
+	instances["Gallery"] = Ink::Instance();
+	instances["Gallery"].mesh = &meshes["Gallery"];
+	instances["Gallery"].scale = {0.2, 0.2, 0.2};
 	
-	scene.add(instances["Gallery"]);
+	if (!enableRealtimeReflection) {
+		materials["Material.001"].emissive = {0.560, 0.570, 0.580};
+		materials["Material.001"].reflection_probe = nullptr;
+	}
+	
+	scene.add(&instances["Gallery"]);
 	
 	scene.set_material("Material.001", &materials["Material.001"]);
 	scene.set_material("Material.002", &materials["Material.002"]);
 	scene.set_material("Material.003", &materials["Material.003"]);
 	scene.set_material("Material.004", &materials["Material.004"]);
 	scene.set_material("Material.006", &materials["Material.006"]);
-	scene.set_material("Material", &materials["Material"]);
+	scene.set_material("Material.005", &materials["Material.005"]);
 	scene.set_material("light.001", &materials["Light.001"]);
 	
 	renderer.load_scene(scene);
@@ -230,21 +235,28 @@ void OneRoom::update(float deltaTime) {
 	Ink::Renderer::update_scene(scene);
 }
 
-void OneRoom::render() {
+void OneRoom::render(const Ink::Camera* camera) {
 	Ink::Gpu::Rect viewport2;
 	viewport2.width = viewport.width * 2;
 	viewport2.height = viewport.height * 2;
 	
-	materials["Material.001"].visible = false;
-	renderer.set_tone_map(Ink::LINEAR_TONE_MAP, 0.7);
-	renderer.update_probe(scene, probes["Ground"]);
-	materials["Material.001"].visible = true;
-	renderer.set_tone_map(Ink::LINEAR_TONE_MAP, 1);
+	if (enableRealtimeReflection) {
+		materials["Material.001"].visible = false;
+		renderer.set_tone_map(Ink::LINEAR_TONE_MAP, 0.7);
+		renderer.update_probe(scene, probes["Ground"]);
+		materials["Material.001"].visible = true;
+		renderer.set_tone_map(Ink::LINEAR_TONE_MAP, 1);
+	}
 	
 	Ink::RenderPass::set_viewport(viewport2);
 	
+	auto* availableCamera = camera;
+	if (availableCamera == nullptr) {
+		availableCamera = viewer.get_camera();
+	}
+	
 	renderer.clear();
-	renderer.render(scene, *viewer.get_camera());
+	renderer.render(scene, *availableCamera);
 	bloomPass.render();
 	toneMapPass.render();
 	fxaaPass.render();
@@ -260,13 +272,13 @@ void OneRoom::setJoint(const Ink::Vec3& pos, const Ink::Vec3& color) {
 	
 	std::string instanceName = "Joint" + std::to_string(jointNumber++);
 	if (instances.count(instanceName) == 0) {
-		instances[instanceName] = Ink::Instance::create();
-		instances[instanceName]->mesh = &meshes["Sphere"];
-		instances[instanceName]->scale = {0.03, 0.03, 0.03};
-		scene.add(instances[instanceName]);
+		instances[instanceName] = Ink::Instance();
+		instances[instanceName].mesh = &meshes["Sphere"];
+		instances[instanceName].scale = {0.03, 0.03, 0.03};
+		scene.add(&instances[instanceName]);
 	}
-	instances[instanceName]->visible = true;
-	instances[instanceName]->position = pos;
+	instances[instanceName].visible = true;
+	instances[instanceName].position = pos;
 	
 	scene.set_material("default", instances[instanceName], &materials[colorName]);
 }
@@ -277,28 +289,28 @@ void OneRoom::setBone(const Ink::Vec3& pos1, const Ink::Vec3& pos2, const Ink::V
 	
 	std::string instanceName = "Bone" + std::to_string(boneNumber++);
 	if (instances.count(instanceName) == 0) {
-		instances[instanceName] = Ink::Instance::create();
-		instances[instanceName]->mesh = &meshes["Cylinder"];
-		instances[instanceName]->scale = {0.02, 1.00, 0.02};
-		scene.add(instances[instanceName]);
+		instances[instanceName] = Ink::Instance();
+		instances[instanceName].mesh = &meshes["Cylinder"];
+		instances[instanceName].scale = {0.02, 1.00, 0.02};
+		scene.add(&instances[instanceName]);
 	}
 	Ink::Vec3 direction = pos1 - pos2;
 	Ink::Euler rotation = Utils3D::makeEuler({0, 1, 0}, direction.normalize());
-	instances[instanceName]->visible = true;
-	instances[instanceName]->position = (pos1 + pos2) * 0.5;
-	instances[instanceName]->rotation = rotation;
-	instances[instanceName]->scale.y = direction.magnitude();
+	instances[instanceName].visible = true;
+	instances[instanceName].position = (pos1 + pos2) * 0.5;
+	instances[instanceName].rotation = rotation;
+	instances[instanceName].scale.y = direction.magnitude();
 	
 	scene.set_material("default", instances[instanceName], &materials[colorName]);
 }
 
 void OneRoom::cleanUpJointsAndBones() {
 	for (int i = 0; i < jointNumber; ++i) {
-		instances["Joint" + std::to_string(i)]->visible = false;
+		instances["Joint" + std::to_string(i)].visible = false;
 	}
 	jointNumber = 0;
 	for (int i = 0; i < boneNumber; ++i) {
-		instances["Bone" + std::to_string(i)]->visible = false;
+		instances["Bone" + std::to_string(i)].visible = false;
 	}
 	boneNumber = 0;
 }
@@ -308,7 +320,13 @@ void OneRoom::setCamera(const Ink::Vec3& pos, const Ink::Vec3& dir) {
 	viewer.set_direction(dir);
 }
 
-Ink::Vec3 OneRoom::DEFAULT_COLOR = Ink::ColorUtils::to_rgb(0x16193B);
+void OneRoom::setRealtimeReflection(bool enable) {
+	enableRealtimeReflection = enable;
+}
+
+const Ink::Vec3 OneRoom::DEFAULT_COLOR = Ink::ColorUtils::to_rgb(0x16193B);
+
+bool OneRoom::enableRealtimeReflection = true;
 
 int OneRoom::jointNumber = 0;
 
@@ -338,7 +356,7 @@ std::unordered_map<std::string, Ink::Material> OneRoom::materials;
 
 std::unordered_map<std::string, Ink::ReflectionProbe> OneRoom::probes;
 
-std::unordered_map<std::string, Ink::Instance*> OneRoom::instances;
+std::unordered_map<std::string, Ink::Instance> OneRoom::instances;
 
 std::unordered_map<std::string, Ink::Gpu::Texture> OneRoom::maps;
 

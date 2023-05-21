@@ -22,13 +22,7 @@
 
 #pragma once
 
-#include "ink/Ink.h"
-
-class MathUtils {
+class AssociationTest {
 public:
-	static float computeRayDistance(const Ink::Ray& ray1, const Ink::Ray& ray2);
 	
-	static Ink::Vec3 multiRayIntersect(const Ink::Ray** rays, size_t size);
-	
-	static Ink::Vec3 multiRayIntersect(const Ink::Ray** rays, float* confs, size_t size);
 };
